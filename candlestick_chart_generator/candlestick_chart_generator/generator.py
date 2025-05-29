@@ -2,7 +2,7 @@ import pandas as pd
 import mplfinance as mpf
 import io
 
-def generate_candlestick_image(df: pd.DataFrame):
+def generate_candlestick_image(df: pd.DataFrame, figsize= None):
     """
     Generates a candlestick chart with volume and moving averages.
 
@@ -46,6 +46,9 @@ def generate_candlestick_image(df: pd.DataFrame):
         mpf.make_addplot(df['Close_MA200'], color='purple', width=0.7),
     ]
 
+    if not figsize:
+        figsize = (6, 3)
+
     # Create the plot
     # The 'volume=True' argument automatically adds a volume subplot.
     # 'style='yahoo'' is a common style for financial charts.
@@ -59,7 +62,7 @@ def generate_candlestick_image(df: pd.DataFrame):
         ylabel='Price ($)',
         volume=True,
         addplot=ma_plots,
-        figsize=(15, 10), # Adjust figure size as needed
+        figsize=figsize, # Adjust figure size as needed
         returnfig=True # Returns the figure and axes objects
     )
 
