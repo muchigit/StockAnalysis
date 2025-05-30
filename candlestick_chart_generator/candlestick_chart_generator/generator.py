@@ -49,7 +49,7 @@ def generate_candlestick_image(df: pd.DataFrame, figsize= None):
     if not figsize:
         figsize = (6, 3)
 
-    mc = mpf.make_marketcolors(up='blue', down='red', inherit=True)
+    mc = mpf.make_marketcolors(up='red', down='blue', inherit=True)
     cs  = mpf.make_mpf_style(base_mpf_style="yahoo", marketcolors=mc)
     # Create the plot
     # The 'volume=True' argument automatically adds a volume subplot.
@@ -65,7 +65,7 @@ def generate_candlestick_image(df: pd.DataFrame, figsize= None):
         ylabel='Price ($)',
 #        volume=True,
         addplot=ma_plots,
-        figsize=(6, 3), # Adjust figure size as needed
+        figsize=(4, 2), # Adjust figure size as needed
         returnfig=True # Returns the figure and axes objects
     )
 
