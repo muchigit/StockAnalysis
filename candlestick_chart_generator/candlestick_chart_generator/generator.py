@@ -49,6 +49,8 @@ def generate_candlestick_image(df: pd.DataFrame, figsize= None):
     if not figsize:
         figsize = (6, 3)
 
+    mc = mpf.make_marketcolors(up='blue', down='red', inherit=True)
+    cs  = mpf.make_mpf_style(base_mpf_style="yahoo", marketcolors=mc)
     # Create the plot
     # The 'volume=True' argument automatically adds a volume subplot.
     # 'style='yahoo'' is a common style for financial charts.
@@ -57,12 +59,13 @@ def generate_candlestick_image(df: pd.DataFrame, figsize= None):
     fig, axes = mpf.plot(
         df,
         type='candle',
-        style='yahoo',
-        title='Candlestick Chart',
+        style= cs,
+#        style='yahoo',
+#        title='Candlestick Chart',
         ylabel='Price ($)',
-        volume=True,
+#        volume=True,
         addplot=ma_plots,
-        figsize=figsize, # Adjust figure size as needed
+        figsize=(6, 3), # Adjust figure size as needed
         returnfig=True # Returns the figure and axes objects
     )
 
