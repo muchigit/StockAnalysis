@@ -1,162 +1,162 @@
-# StockData Library
+# StockData ライブラリ
 
-A Python library to fetch and process stock market data using the `yfinance` package. This library allows you to retrieve historical stock prices, company information, and calculate common technical indicators like moving averages.
+`yfinance` パッケージを使用して株式市場データを取得および処理するためのPythonライブラリです。このライブラリを使用すると、過去の株価、企業情報を取得し、移動平均などの一般的なテクニカル指標を計算できます。
 
-## Installation
+## インストール
 
-To use this library, you can install it directly or install its dependencies.
+このライブラリを使用するには、直接インストールするか、依存関係をインストールします。
 
-1.  **Clone the repository (if you haven't already):**
+1.  **リポジトリをクローンします（まだクローンしていない場合）：**
     ```bash
-    git clone <your_repository_url_here> # Replace with the actual URL
-    cd stockdata 
+    git clone <your_repository_url_here> # 実際のURLに置き換えてください
+    cd stockdata
     ```
 
-2.  **Install dependencies:**
-    You can install the required packages using the `requirements.txt` file:
+2.  **依存関係をインストールします：**
+    `requirements.txt` ファイルを使用して必要なパッケージをインストールできます。
     ```bash
     pip install -r requirements.txt
     ```
-    Alternatively, if you want to install the package itself (e.g., to make it importable from elsewhere), you can run:
+    または、パッケージ自体をインストールする場合（例えば、他の場所からインポート可能にするため）、次を実行できます。
     ```bash
     pip install .
     ```
 
-This will install `yfinance`, `pandas`, and other necessary libraries.
+これにより、`yfinance`、`pandas`、およびその他の必要なライブラリがインストールされます。
 
-## Basic Usage
+## 基本的な使用方法
 
-The core of this library is the `StockData` class, found in `stockdata.stockdata`.
+このライブラリの中核は `stockdata.stockdata` にある `StockData` クラスです。
 
-### Initialization
+### 初期化
 
-First, import and initialize the `StockData` class. You can optionally provide a `start_date` for historical data. If no `start_date` is provided, it defaults to two years prior to the current date.
+まず、`StockData` クラスをインポートして初期化します。オプションで過去のデータの `start_date` を指定できます。`start_date` が指定されていない場合は、現在の日付の2年前にデフォルト設定されます。
 
 ```python
 from stockdata.stockdata import StockData
 from datetime import datetime
 
-# Initialize with default start date (2 years ago)
+# デフォルトの開始日（2年前）で初期化
 sd = StockData()
 
-# Or, initialize with a specific start date
+# または、特定の開始日で初期化
 start_date_str = "2020-01-01"
 start_date_obj = datetime.strptime(start_date_str, "%Y-%m-%d").date()
 sd_custom_start = StockData(start_date=start_date_obj)
 ```
 
-### Fetching Historical Stock Data
+### 過去の株価データの取得
 
-Use the `get_stock_data(symbol, asc=True)` method to retrieve historical market data for a stock.
+株式の過去の市場データを取得するには、`get_stock_data(symbol, asc=True)` メソッドを使用します。
 
--   `symbol` (str): The stock ticker symbol (e.g., "AAPL", "MSFT").
--   `asc` (bool, optional): Determines the sort order of the data. Defaults to `True` (ascending by date). If `False`, data is returned in descending order.
+-   `symbol` (str): 株式のティッカーシンボル（例："AAPL"、"MSFT"）。
+-   `asc` (bool, オプション): データのソート順を決定します。デフォルトは `True`（日付の昇順）です。`False` の場合、データは降順で返されます。
 
-The method returns a Pandas DataFrame containing:
--   Date (as index)
--   Open
--   High
--   Low
--   Close
--   Adj Close
--   Volume
--   Calculated moving averages:
-    -   `Close_MA20` (20-day moving average of Close price)
-    -   `Close_MA50` (50-day moving average of Close price)
-    -   `Close_MA200` (200-day moving average of Close price)
-    -   `Volume_MA50` (50-day moving average of Volume)
-    -   `Volume_MA200` (200-day moving average of Volume)
+このメソッドは、次の情報を含むPandas DataFrameを返します。
+-   日付（インデックスとして）
+-   始値
+-   高値
+-   安値
+-   終値
+-   調整後終値
+-   出来高
+-   計算された移動平均：
+    -   `Close_MA20`（終値の20日間移動平均）
+    -   `Close_MA50`（終値の50日間移動平均）
+    -   `Close_MA200`（終値の200日間移動平均）
+    -   `Volume_MA50`（出来高の50日間移動平均）
+    -   `Volume_MA200`（出来高の200日間移動平均）
 
-All numerical data in the DataFrame is rounded to two decimal places. If no data is found for the symbol, an empty DataFrame is returned.
+DataFrame内のすべての数値データは小数点以下2桁に丸められます。シンボルのデータが見つからない場合は、空のDataFrameが返されます。
 
 ```python
-# Get data for Apple (AAPL)
+# Apple (AAPL) のデータを取得
 aapl_data = sd.get_stock_data("AAPL")
 print(aapl_data.head())
 
-# Get data for Microsoft (MSFT) in descending order
+# Microsoft (MSFT) のデータを降順で取得
 msft_data_desc = sd.get_stock_data("MSFT", asc=False)
 print(msft_data_desc.head())
 ```
 
-### Fetching Company Information
+### 企業情報の取得
 
-Use the `get_stock_info(symbol)` method to get general information about a company.
+企業の一般情報を取得するには、`get_stock_info(symbol)` メソッドを使用します。
 
--   `symbol` (str): The stock ticker symbol.
+-   `symbol` (str): 株式のティッカーシンボル。
 
-This method returns a dictionary containing various details about the company (e.g., sector, industry, summary, website). The content can vary depending on the data available from yfinance.
+このメソッドは、企業に関するさまざまな詳細情報（セクター、業種、概要、ウェブサイトなど）を含む辞書を返します。内容はyfinanceから入手可能なデータによって異なる場合があります。
 
 ```python
 aapl_info = sd.get_stock_info("AAPL")
 if aapl_info:
-    print(f"Company Name: {aapl_info.get('longName')}")
-    print(f"Sector: {aapl_info.get('sector')}")
-    print(f"Website: {aapl_info.get('website')}")
+    print(f"企業名: {aapl_info.get('longName')}")
+    print(f"セクター: {aapl_info.get('sector')}")
+    print(f"ウェブサイト: {aapl_info.get('website')}")
 else:
-    print("Could not retrieve info for AAPL.")
+    print("AAPLの情報を取得できませんでした。")
 ```
 
-### Listing Fetched Symbols
+### 取得したシンボルのリスト表示
 
-Use the `get_symbol_list()` method to get a list of all ticker symbols for which data has been successfully fetched and cached within the `StockData` instance.
+`StockData` インスタンス内で正常にフェッチされキャッシュされたすべてのティッカーシンボルのリストを取得するには、`get_symbol_list()` メソッドを使用します。
 
 ```python
-# After fetching data for AAPL and MSFT
+# AAPL と MSFT のデータを取得した後
 symbols_fetched = sd.get_symbol_list()
-print(f"Data has been fetched for: {symbols_fetched}") # Expected: ['AAPL', 'MSFT'] (or similar)
+print(f"データが取得されたシンボル: {symbols_fetched}") # 期待値: ['AAPL', 'MSFT'] (または同様のもの)
 ```
 
-## Example
+## 例
 
-Here's a simple example demonstrating how to use the `StockData` library:
+`StockData` ライブラリの使用方法を示す簡単な例です。
 
 ```python
 from stockdata.stockdata import StockData
 from datetime import datetime
 
-# Initialize StockData
-# Using a specific start date for this example
+# StockData を初期化
+# この例では特定の開始日を使用
 start_date = datetime.strptime("2022-01-01", "%Y-%m-%d").date()
 stock_handler = StockData(start_date=start_date)
 
-# Define a list of stock symbols to process
+# 処理する株式シンボルのリストを定義
 symbols = ["GOOGL", "TSLA"]
 
-# Fetch and display data for each symbol
+# 各シンボルのデータを取得して表示
 for symbol in symbols:
     print(f"--- {symbol} ---")
 
-    # Get company information
+    # 企業情報を取得
     info = stock_handler.get_stock_info(symbol)
     if info:
-        print(f"Name: {info.get('shortName', 'N/A')}")
-        print(f"Sector: {info.get('sector', 'N/A')}")
+        print(f"名前: {info.get('shortName', 'N/A')}")
+        print(f"セクター: {info.get('sector', 'N/A')}")
     else:
-        print(f"Could not retrieve information for {symbol}.")
+        print(f"{symbol} の情報を取得できませんでした。")
 
-    # Get historical stock data
-    data = stock_handler.get_stock_data(symbol, asc=False) # Get data in descending order
+    # 過去の株価データを取得
+    data = stock_handler.get_stock_data(symbol, asc=False) # データを降順で取得
     if not data.empty:
-        print("Recent stock data (last 5 days):")
+        print("最近の株価データ（過去5日間）：")
         print(data.head())
-        print(f"Data columns: {data.columns.tolist()}")
+        print(f"データ列: {data.columns.tolist()}")
     else:
-        print(f"No historical data found for {symbol}.")
+        print(f"{symbol} の過去のデータは見つかりませんでした。")
     print("\n")
 
-# List all symbols for which data was fetched
-print(f"Successfully fetched data for symbols: {stock_handler.get_symbol_list()}")
+# データが取得されたすべてのシンボルをリスト表示
+print(f"正常に取得されたシンボル: {stock_handler.get_symbol_list()}")
 
 ```
 
-This example initializes `StockData`, fetches information and recent historical data for Google (GOOGL) and Tesla (TSLA), and then prints the list of symbols processed.
+この例では、`StockData` を初期化し、Google (GOOGL) と Tesla (TSLA) の情報と最近の過去のデータを取得し、処理されたシンボルのリストを出力します。
 
-## Dependencies
+## 依存関係
 
-This library primarily relies on the following Python packages:
+このライブラリは主に次のPythonパッケージに依存しています。
 
--   **yfinance**: Used to fetch stock market data from Yahoo! Finance.
--   **pandas**: Used for data manipulation and analysis, particularly for handling the historical stock data in DataFrames.
+-   **yfinance**: Yahoo! Financeから株式市場データを取得するために使用されます。
+-   **pandas**: データ操作と分析、特に過去の株価データをDataFrameで処理するために使用されます。
 
-These dependencies are listed in `requirements.txt` and will be installed automatically if you use `pip install -r requirements.txt` or `pip install .`.
+これらの依存関係は `requirements.txt` にリストされており、`pip install -r requirements.txt` または `pip install .` を使用すると自動的にインストールされます。
