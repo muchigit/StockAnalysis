@@ -34,12 +34,13 @@ class StockData:
             data = self.data_dict[symbol]
         else:
             today = date.today()
-            data = yf.download(symbol, start=self.start_date, end=today, progress=False)
+            data = yf.download(symbol, start=self.start_date, end=today, progress=False, auto_adjust=True)
             if data.empty:
               print(f"No data found for {symbol}")
               return pd.DataFrame()
 
             data = data.xs(symbol, level=1, axis=1)
+            data['Close_MA5'] = data['Close'].rolling(window=5).mean()
             data['Close_MA20'] = data['Close'].rolling(window=20).mean()
             data['Close_MA50'] = data['Close'].rolling(window=50).mean()
             data['Close_MA200'] = data['Close'].rolling(window=200).mean()
@@ -48,6 +49,8 @@ class StockData:
 
             # 上記のdataの列について、四捨五入した値を再設定
             data = data.round(2)
+
+            data.fillna(0, inplace=True)
 
             if not asc:
                 data = data.iloc[::-1]

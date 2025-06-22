@@ -2,7 +2,7 @@ import pandas as pd
 import mplfinance as mpf
 import io
 
-def generate_candlestick_image(df: pd.DataFrame, figsize= None):
+def generate_candlestick_image(df: pd.DataFrame, figsize= None, datetime_format=''):
     """
     Generates a candlestick chart with volume and moving averages.
 
@@ -41,9 +41,9 @@ def generate_candlestick_image(df: pd.DataFrame, figsize= None):
 
     # Define moving average plots
     ma_plots = [
-        mpf.make_addplot(df['Close_MA20'], color='blue', width=0.7),
-        mpf.make_addplot(df['Close_MA50'], color='orange', width=0.7),
-        mpf.make_addplot(df['Close_MA200'], color='purple', width=0.7),
+        mpf.make_addplot(df['Close_MA20'], color='red', width=0.7),
+        mpf.make_addplot(df['Close_MA50'], color='green', width=0.7),
+        mpf.make_addplot(df['Close_MA200'], color='blue', width=0.7),
     ]
 
     if not figsize:
@@ -62,7 +62,8 @@ def generate_candlestick_image(df: pd.DataFrame, figsize= None):
         style= cs,
 #        style='yahoo',
 #        title='Candlestick Chart',
-        ylabel='Price ($)',
+        ylabel='',
+        datetime_format=datetime_format,
 #        volume=True,
         addplot=ma_plots,
         figsize=(4, 2), # Adjust figure size as needed
@@ -73,7 +74,7 @@ def generate_candlestick_image(df: pd.DataFrame, figsize= None):
     image_stream = io.BytesIO()
     fig.savefig(image_stream, format='png')
     image_stream.seek(0) # Rewind the stream to the beginning
-
+    
     return image_stream
 
 if __name__ == '__main__':
