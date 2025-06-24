@@ -52,10 +52,10 @@ class StockData:
 
             data.fillna(0, inplace=True)
 
-            if not asc:
-                data = data.iloc[::-1]
-
             self.data_dict[symbol] = data
+
+        if not asc:
+            data = data.iloc[::-1]
         return data
 
     def get_symbol_list(self):
