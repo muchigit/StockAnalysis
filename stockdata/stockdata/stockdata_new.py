@@ -4,10 +4,12 @@ import pandas as pd
 
 class StockData:
     def __init__(self, start_date=None):
+        """コンストラクタ"""
         self.data_dict = {}
         self.info_dict = {}
         if start_date is None:
             today = date.today()
+            # デフォルトで過去2年分のデータを取得
             self.start_date = today - timedelta(days=365 * 2)
         else:
             self.start_date = start_date
@@ -19,7 +21,7 @@ class StockData:
         # 曜日が金曜日(4)になるまで1日ずつ戻る
         while last_day.weekday() != 4:
             last_day -= timedelta(days=1)
-        return last_day.strftime('%Y-%m-%d')
+        return last_day
 
     def _find_nth_friday(self, year, month, n):
         """指定された年月の第n金曜日を見つける"""
@@ -29,7 +31,7 @@ class StockData:
         first_friday = first_day_of_month + timedelta(days=days_to_first_friday)
         # 第n金曜日を計算
         nth_friday = first_friday + timedelta(weeks=n - 1)
-        return nth_friday.strftime('%Y-%m-%d')
+        return nth_friday
 
     def _adjust_rebalance_volume(self, data: pd.DataFrame) -> pd.DataFrame:
         """
@@ -53,9 +55,8 @@ class StockData:
                 dates_to_adjust.append(self._find_nth_friday(year, 11, 2))
         
         # DataFrameのインデックス（Timestamp型）と一致させる
-        dates_to_adjust_ts = dates_to_adjust
+        dates_to_adjust_ts = [pd.Timestamp(d) for d in dates_to_adjust]
         
-        volume_index = data.columns.get_loc('Volume')
         for trade_date in dates_to_adjust_ts:
             # 調整対象日がデータに含まれているか確認
             if trade_date in data.index:
@@ -64,87 +65,78 @@ class StockData:
                     if loc > 0:
                         # 前営業日の出来高を取得
                         prev_day_volume = data.iloc[loc - 1]['Volume']
-                        #print(trade_date, data.iloc[loc]['Volume'], " -> ", prev_day_volume)
                         # 当該日の出来高を前日の値で上書き
-                        data.iloc[loc, volume_index] = prev_day_volume
-                except Exception as e:
-                    print(f"Error getting info for {trade_date}: {e}")
+                        data.loc[trade_date, 'Volume'] = prev_day_volume
+                except KeyError:
                     continue
         return data
 
     def get_stock_info(self, symbol):
+        """銘柄情報を取得する"""
         if symbol in self.info_dict:
-            info = self.info_dict[symbol]
-        else:
-            today = date.today()
+            return self.info_dict[symbol]
+        
+        try:
             ticker = yf.Ticker(symbol)
-            if ticker == None:
-              print(f"No data found for {symbol}")
-              return None
-            try:
-              info = ticker.info
-            except Exception as e:
-              print(f"Error getting info for {symbol}: {e}")
-              info = None
+            info = ticker.info
             self.info_dict[symbol] = info
-        return info
-
-    def prepare_stock_data(self, target_symbols):
-        today = date.today()
-
-        cached_symbols = self.get_symbol_list()
-        symbols = [i for i in target_symbols if i not in cached_symbols]
-        if not symbols:
-            return
-
-        multidata = yf.download(symbols, start=self.start_date, end=today, progress=False, auto_adjust=True, group_by='ticker')
-        if multidata.empty:
-            print(f"No data found for {symbols}")
-
-        for symbol in symbols:
-            try:
-                data = multidata[symbol].copy()
-                # ★★★ 出来高の調整処理を呼び出す ★★★
-                data = self._adjust_rebalance_volume(data)
-
-                data = self._normalize_stock_data(data)
-                self.data_dict[symbol] = data
-            except Exception as e:
-              print(f"Error preparing data for {symbol}: {e}")
+            return info
+        except Exception as e:
+            print(f"Error getting info for {symbol}: {e}")
+            return None
 
     def get_stock_data(self, symbol, asc=True):
-        if symbol not in self.data_dict:
-            self.prepare_stock_data([symbol])
+        """株価データを取得し、テクニカル指標を計算する"""
+        if symbol in self.data_dict:
+            data = self.data_dict[symbol]
+        else:
+            today = date.today()
+            data = yf.download(symbol, start=self.start_date, end=today, progress=False, auto_adjust=True)
+            if data.empty:
+                print(f"No data found for {symbol}")
+                return pd.DataFrame()
 
-        data = self.data_dict[symbol]
+            # ★★★ 出来高の調整処理を呼び出す ★★★
+            data = self._adjust_rebalance_volume(data)
+
+            # 各種移動平均を計算
+            data['Close_MA5'] = data['Close'].rolling(window=5).mean()
+            data['Close_MA20'] = data['Close'].rolling(window=20).mean()
+            data['Close_MA50'] = data['Close'].rolling(window=50).mean()
+            data['Close_MA200'] = data['Close'].rolling(window=200).mean()
+            data['Volume_MA50'] = data['Volume'].rolling(window=50).mean()
+            data['Volume_MA200'] = data['Volume'].rolling(window=200).mean()
+
+            # データを四捨五入し、欠損値を0で埋める
+            data = data.round(2)
+            data.fillna(0, inplace=True)
+
+            self.data_dict[symbol] = data
+
         if not asc:
-            data = data.iloc[::-1]
-        return data
-
-    def _normalize_stock_data(self, data):
-        data['Close_MA5'] = data['Close'].rolling(window=5).mean()
-        data['Close_MA20'] = data['Close'].rolling(window=20).mean()
-        data['Close_MA50'] = data['Close'].rolling(window=50).mean()
-        data['Close_MA200'] = data['Close'].rolling(window=200).mean()
-        data['Volume_MA50'] = data['Volume'].rolling(window=50).mean()
-        data['Volume_MA200'] = data['Volume'].rolling(window=200).mean()
-
-        # 上記のdataの列について、四捨五入した値を再設定
-        data = data.round(2)
-
-        data.fillna(0, inplace=True)
+            data = data.sort_index(ascending=False)
         return data
 
     def get_symbol_list(self):
+        """処理済みの銘柄リストを取得する"""
         return list(self.data_dict.keys())
 
+# --- 実行部分 ---
 if __name__ == "__main__":
     stock_data_handler = StockData()
-    symbols = ["PDEX"] # Example symbols, replace with your desired list
+    # 例としてRussell 2000 ETF (IWM) のデータを取得
+    symbols = ["IWM"] 
 
     for symbol in symbols:
         print(f"Processing: {symbol}")
-        data = stock_data_handler.get_stock_data(symbol, asc=True)
-        print()
-        print(data.index[0].strftime('%Y-%m-%d'), type(data.index[0]))
-        print(data.tail(200).to_csv())
+        # asc=Falseで最新のデータが上にくるようにソート
+        data = stock_data_handler.get_stock_data(symbol, asc=False)
+        
+        if not data.empty:
+            # 6月の最終金曜日周辺のデータを確認
+            june_data = data[(data.index.month == 6) & (data.index.year == 2024)]
+            print("\n--- 2024年6月のデータ（出来高調整の確認） ---")
+            print(june_data[['Close', 'Volume']].tail(10)) # 最後の10日間を表示
+
+            print("\n--- 最新20日間のデータ ---")
+            print(data.head(20).to_string())

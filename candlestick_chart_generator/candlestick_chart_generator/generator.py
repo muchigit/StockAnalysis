@@ -64,7 +64,7 @@ def generate_candlestick_image(df: pd.DataFrame, figsize= None, datetime_format=
 #        title='Candlestick Chart',
         ylabel='',
         datetime_format=datetime_format,
-#        volume=True,
+        volume=True,
         addplot=ma_plots,
         figsize=(4, 2), # Adjust figure size as needed
         returnfig=True # Returns the figure and axes objects
