@@ -1,0 +1,8 @@
+
+--- Processing ROOT ---
+Template has COMPANYNAME? True
+Content Start: ROOT [%COMPANYNAME%] 分析レポート(2025-12-17)
+
+# 依頼事項
+以下...
+Replaced with: Root, Inc.

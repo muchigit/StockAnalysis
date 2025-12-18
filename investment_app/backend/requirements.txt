@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+sqlmodel
+pandas
+yfinance
+openpyxl
+selenium
+undetected-chromedriver
+matplotlib
+pyarrow

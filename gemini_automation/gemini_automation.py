@@ -22,8 +22,11 @@ COL_RESEARCH_TEXT = 24
 
 # 投資判断を実施するティッカーシンボル群
 analysis_tickers = """
-ALCO
-PRSO
+COMP
+HBNC
+FSTR
+GRWG
+RDNW
 """
 
 # Excelファイルのパスを指定
