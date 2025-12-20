@@ -14,6 +14,10 @@ class AnalyzeRequest(BaseModel):
     symbol: str
     prompt: str
 
+class AnalyzeRequest(BaseModel):
+    symbol: str
+    prompt: str
+
 @router.post("/analyze")
 def analyze_stock(request: AnalyzeRequest, background_tasks: BackgroundTasks):
     """Trigger Gemini Deep Research"""
@@ -26,19 +30,24 @@ class FileImportRequest(BaseModel):
     file_paths: List[str]
 
 @router.post("/import/files")
+@router.post("/import/files")
 def import_files(request: FileImportRequest):
     """Import Finviz/IBD files or Moomoo CSVs synchronously"""
+    print(f"[Automation Router] Received import request: {request.file_paths}")
     
     finviz_files = []
     moomoo_files = []
     
     for p in request.file_paths:
         p = p.strip('"').strip("'")
+        print(f"[Automation Router] Processing path: {p}")
         if "履歴" in p or "moomoo" in p.lower():
             moomoo_files.append(p)
         else:
             finviz_files.append(p)
-            
+    
+    print(f"[Automation Router] Finviz: {finviz_files}, Moomoo: {moomoo_files}")
+    
     # Run synchronously so frontend waits
     run_import_task(finviz_files, moomoo_files)
     

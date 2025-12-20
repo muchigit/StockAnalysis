@@ -30,3 +30,23 @@ def delete_filter(filter_id: int, session: Session = Depends(get_session)):
     session.delete(filter_obj)
     session.commit()
     return {"ok": True}
+
+class FilterUpdate(BaseModel):
+    name: str | None = None
+    criteria_json: str | None = None
+
+@router.put("/{filter_id}", response_model=SavedFilter)
+def update_filter(filter_id: int, filter_update: FilterUpdate, session: Session = Depends(get_session)):
+    db_filter = session.get(SavedFilter, filter_id)
+    if not db_filter:
+        raise HTTPException(status_code=404, detail="Filter not found")
+    
+    if filter_update.name is not None:
+        db_filter.name = filter_update.name
+    if filter_update.criteria_json is not None:
+        db_filter.criteria_json = filter_update.criteria_json
+    
+    session.add(db_filter)
+    session.commit()
+    session.refresh(db_filter)
+    return db_filter

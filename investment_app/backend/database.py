@@ -58,8 +58,31 @@ class Stock(SQLModel, table=True):
     change_percentage_50d: Optional[float] = None
 
     change_percentage_200d: Optional[float] = None
+    
+    # SMA Deviations
+    deviation_5ma_pct: Optional[float] = None
+    deviation_20ma_pct: Optional[float] = None
+    deviation_50ma_pct: Optional[float] = None
+    deviation_200ma_pct: Optional[float] = None
+
+    # MA Slopes (Daily Change)
+    slope_5ma: Optional[float] = None
+    slope_20ma: Optional[float] = None
+    slope_50ma: Optional[float] = None
+    slope_200ma: Optional[float] = None
+
+    # Price & Relative Strength
+    current_price: Optional[float] = None
+    rs_5d: Optional[float] = None
+    rs_20d: Optional[float] = None
+    rs_50d: Optional[float] = None
+    rs_200d: Optional[float] = None
+
     is_in_uptrend: Optional[bool] = Field(default=False)
     asset_type: Optional[str] = Field(default="stock") # stock, index
+    
+    # Chart Data
+    daily_chart_data: Optional[str] = Field(default=None) # JSON list of OHLCV
     
     # IBD Ratings
     composite_rating: Optional[int] = Field(default=None)
@@ -82,6 +105,7 @@ class Stock(SQLModel, table=True):
     signal_price_up: Optional[int] = Field(default=0)
     signal_break_atr: Optional[int] = Field(default=0)
     signal_high_slope5ma: Optional[int] = Field(default=0)
+    signal_rebound_5ma: Optional[int] = Field(default=0)
 
     first_import_date: Optional[datetime] = Field(default=None)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -122,3 +146,10 @@ class GeminiPrompt(SQLModel, table=True):
     content: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+class TableViewConfig(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True)
+    columns_json: str # JSON list of column keys
+    is_default: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)

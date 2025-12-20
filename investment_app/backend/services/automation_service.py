@@ -283,7 +283,7 @@ class GeminiAutomationService:
 
             # Start Research Confirmation Button
             self.log("Waiting for Start Research button...")
-            start_res_btn = WebDriverWait(driver, 60).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'リサーチを開始')]")))
+            start_res_btn = WebDriverWait(driver, 600).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'リサーチを開始')]")))
             # Click via JS often better for overlay issues
             driver.execute_script("arguments[0].click();", start_res_btn)
             
@@ -309,6 +309,15 @@ class GeminiAutomationService:
 
         except Exception as e:
             self.log(f"Automation Error: {e}")
+            try:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                # Save to backend/debug_screenshots relative to where app runs (usually root/investment_app)
+                # We used run_command to create investment_app/backend/debug_screenshots, but need to be careful with path
+                screenshot_path = os.path.abspath(f"backend/debug_screenshots/error_{symbol}_{timestamp}.png")
+                driver.save_screenshot(screenshot_path)
+                self.log(f"Saved error screenshot to: {screenshot_path}")
+            except Exception as se:
+                self.log(f"Failed to save screenshot: {se}")
             return False
 
 automation_service = GeminiAutomationService()

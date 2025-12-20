@@ -6,3 +6,411 @@ Content Start: ROOT [%COMPANYNAME%] 分析レポート(2025-12-17)
 # 依頼事項
 以下...
 Replaced with: Root, Inc.
+
+--- Processing FBRX ---
+Template has COMPANYNAME? True
+Content Start: FBRX [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下...
+Replaced with: Forte Biosciences, Inc.
+
+--- Processing RRR ---
+Template has COMPANYNAME? True
+Content Start: RRR [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: Red Rock Resorts, Inc.
+
+--- Processing OTTR ---
+Template has COMPANYNAME? True
+Content Start: OTTR [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下...
+Replaced with: Otter Tail Corporation
+
+--- Processing DBVT ---
+Template has COMPANYNAME? True
+Content Start: DBVT [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下...
+Replaced with: DBV Technologies S.A.
+
+--- Processing TXT ---
+Template has COMPANYNAME? True
+Content Start: TXT [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: Textron Inc.
+
+--- Processing TKO ---
+Template has COMPANYNAME? True
+Content Start: TKO [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: TKO Group Holdings, Inc.
+
+--- Processing BCO ---
+Template has COMPANYNAME? True
+Content Start: BCO [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: The Brink's Company
+
+--- Processing DBVT ---
+Template has COMPANYNAME? True
+Content Start: DBVT [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下...
+Replaced with: DBV Technologies S.A.
+
+--- Processing TXT ---
+Template has COMPANYNAME? True
+Content Start: TXT [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: Textron Inc.
+
+--- Processing TKO ---
+Template has COMPANYNAME? True
+Content Start: TKO [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: TKO Group Holdings, Inc.
+
+--- Processing BCO ---
+Template has COMPANYNAME? True
+Content Start: BCO [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: The Brink's Company
+
+--- Processing KAR ---
+Template has COMPANYNAME? True
+Content Start: KAR [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: OPENLANE, Inc.
+
+--- Processing NNI ---
+Template has COMPANYNAME? True
+Content Start: NNI [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: Nelnet, Inc.
+
+--- Processing CHEF ---
+Template has COMPANYNAME? True
+Content Start: CHEF [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下...
+Replaced with: The Chefs' Warehouse, Inc.
+
+--- Processing UTH ---
+Template has COMPANYNAME? True
+Content Start: UTH [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: 496838
+
+--- Processing DBVT ---
+Template has COMPANYNAME? True
+Content Start: DBVT [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下...
+Replaced with: DBV Technologies S.A.
+
+--- Processing TXT ---
+Template has COMPANYNAME? True
+Content Start: TXT [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: Textron Inc.
+
+--- Processing TKO ---
+Template has COMPANYNAME? True
+Content Start: TKO [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: TKO Group Holdings, Inc.
+
+--- Processing BCO ---
+Template has COMPANYNAME? True
+Content Start: BCO [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: The Brink's Company
+
+--- Processing KAR ---
+Template has COMPANYNAME? True
+Content Start: KAR [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: OPENLANE, Inc.
+
+--- Processing NNI ---
+Template has COMPANYNAME? True
+Content Start: NNI [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: Nelnet, Inc.
+
+--- Processing CHEF ---
+Template has COMPANYNAME? True
+Content Start: CHEF [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下...
+Replaced with: The Chefs' Warehouse, Inc.
+
+--- Processing UTH ---
+Template has COMPANYNAME? True
+Content Start: UTH [%COMPANYNAME%] 分析レポート(2025-12-18)
+
+# 依頼事項
+以下で...
+Replaced with: 496838
+
+--- Processing HBCP ---
+Template has COMPANYNAME? True
+Content Start: HBCP [%COMPANYNAME%] 分析レポート(2025-12-19)
+
+# 依頼事項
+以下...
+Replaced with: Home Bancorp, Inc.
+
+--- Processing CAC ---
+Template has COMPANYNAME? True
+Content Start: CAC [%COMPANYNAME%] 分析レポート(2025-12-19)
+
+# 依頼事項
+以下で...
+Replaced with: Camden National Corporation
+
+--- Processing SMBC ---
+Template has COMPANYNAME? True
+Content Start: SMBC [%COMPANYNAME%] 分析レポート(2025-12-19)
+
+# 依頼事項
+以下...
+Replaced with: Southern Missouri Bancorp, Inc.
+
+--- Processing VBNK ---
+Template has COMPANYNAME? True
+Content Start: VBNK [%COMPANYNAME%] 分析レポート(2025-12-19)
+
+# 依頼事項
+以下...
+Replaced with: VersaBank
+
+--- Processing CARE ---
+Template has COMPANYNAME? True
+Content Start: CARE [%COMPANYNAME%] 分析レポート(2025-12-19)
+
+# 依頼事項
+以下...
+Replaced with: Carter Bankshares, Inc.
+
+--- Processing BFST ---
+Template has COMPANYNAME? True
+Content Start: BFST [%COMPANYNAME%] 分析レポート(2025-12-19)
+
+# 依頼事項
+以下...
+Replaced with: Business First Bancshares, Inc.
+
+--- Processing WSBF ---
+Template has COMPANYNAME? True
+Content Start: WSBF [%COMPANYNAME%] 分析レポート(2025-12-19)
+
+# 依頼事項
+以下...
+Replaced with: Waterstone Financial, Inc.
+
+--- Processing VSCO ---
+Template has COMPANYNAME? True
+Content Start: VSCO [%COMPANYNAME%] 分析レポート(2025-12-19)
+
+# 依頼事項
+以下...
+Replaced with: Victoria's Secret & Co.
+
+--- Processing AXL ---
+Template has COMPANYNAME? True
+Content Start: AXL [%COMPANYNAME%] 分析レポート(2025-12-19)
+
+# 依頼事項
+以下で...
+Replaced with: American Axle & Manufacturing Holdings, Inc.
+
+--- Processing EQBK ---
+Template has COMPANYNAME? True
+Content Start: EQBK [%COMPANYNAME%] 分析レポート(2025-12-19)
+
+# 依頼事項
+以下...
+Replaced with: Equity Bancshares, Inc.
+
+--- Processing CAC ---
+Template has COMPANYNAME? True
+Content Start: CAC [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下で...
+Replaced with: Camden National
+
+--- Processing CAC ---
+Template has COMPANYNAME? True
+Content Start: CAC [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下で...
+Replaced with: Camden National
+
+--- Processing SMBC ---
+Template has COMPANYNAME? True
+Content Start: SMBC [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下...
+Replaced with: SOUTHERN MISSOURI BANCRP
+
+--- Processing VBNK ---
+Template has COMPANYNAME? True
+Content Start: VBNK [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下...
+Replaced with: VersaBank
+
+--- Processing CARE ---
+Template has COMPANYNAME? True
+Content Start: CARE [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下...
+Replaced with: Carter Bankshares, Inc.
+
+--- Processing BFST ---
+Template has COMPANYNAME? True
+Content Start: BFST [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下...
+Replaced with: Business First Bancshares, Inc.
+
+--- Processing WSBF ---
+Template has COMPANYNAME? True
+Content Start: WSBF [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下...
+Replaced with: Waterstone Financial, Inc.
+
+--- Processing VSCO ---
+Template has COMPANYNAME? True
+Content Start: VSCO [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下...
+Replaced with: Victoria's Secret & Co.
+
+--- Processing AXL ---
+Template has COMPANYNAME? True
+Content Start: AXL [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下で...
+Replaced with: American Axle & Manufacturing Holdings, Inc.
+
+--- Processing EQBK ---
+Template has COMPANYNAME? True
+Content Start: EQBK [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下...
+Replaced with: Equity Bancshares, Inc.
+
+--- Processing TSBK ---
+Template has COMPANYNAME? True
+Content Start: TSBK [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下...
+Replaced with: Timberland Bancorp, Inc.
+
+--- Processing ELE ---
+Template has COMPANYNAME? True
+Content Start: ELE [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下で...
+Replaced with: Elemental Royalty Corporation
+
+--- Processing LCII ---
+Template has COMPANYNAME? True
+Content Start: LCII [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下...
+Replaced with: LCI Industries
+
+--- Processing CFBK ---
+Template has COMPANYNAME? True
+Content Start: CFBK [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下...
+Replaced with: CF Bankshares Inc.
+
+--- Processing HWBK ---
+Template has COMPANYNAME? True
+Content Start: HWBK [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下...
+Replaced with: Hawthorn Bancshares, Inc.
+
+--- Processing MLI ---
+Template has COMPANYNAME? True
+Content Start: MLI [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下で...
+Replaced with: Mueller Industries, Inc.
+
+--- Processing HII ---
+Template has COMPANYNAME? True
+Content Start: HII [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下で...
+Replaced with: Huntington Ingalls Industries, Inc.
+
+--- Processing AXSM ---
+Template has COMPANYNAME? True
+Content Start: AXSM [%COMPANYNAME%] 分析レポート(2025-12-20)
+
+# 依頼事項
+以下...
+Replaced with: Axsome Therapeutics, Inc.

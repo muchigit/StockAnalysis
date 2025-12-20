@@ -21,7 +21,26 @@ class UpdateManager:
             cls._instance.message = ""
             cls._instance.progress = 0
             cls._instance.total = 0
-            cls._instance.last_completed = None
+            try:
+                with Session(engine) as session:
+                    # Fallback: Get latest updated_at from DB
+                    from sqlalchemy import func
+                    latest = session.exec(select(func.max(Stock.updated_at))).first()
+                    # latest is datetime or None.
+                    # Convert to ISO format if exists.
+                    if latest:
+                        # Assuming stored as naive UTC (updated_at = datetime.utcnow())
+                        # We append 'Z' to indicate UTC to the frontend.
+                        # If it already had timezone info, isoformat() would include it.
+                        iso = latest.isoformat()
+                        if latest.tzinfo is None:
+                            iso += 'Z'
+                        cls._instance.last_completed = iso
+                    else:
+                        cls._instance.last_completed = None
+            except Exception:
+                cls._instance.last_completed = None
+                
             cls._instance.is_stop_requested = False
             cls._instance.thread = None
         return cls._instance
@@ -92,7 +111,8 @@ class UpdateManager:
             if not self.is_stop_requested:
                 self.status = "completed"
                 self.message = "All updates completed."
-                self.last_completed = datetime.now(JST).isoformat()
+                # Use UTC to match DB fallback logic
+                self.last_completed = datetime.utcnow().isoformat() + 'Z'
                 
         except Exception as e:
             self.status = "error"
@@ -109,6 +129,31 @@ class UpdateManager:
              # If we passed list of Stock objects, they might be detached.
              # Safest is to extract symbols and re-fetch.
              symbols=[s.symbol if isinstance(s, Stock) else s for s in stocks]
+
+             # --- PRE-FETCH SP500 FOR RS CALCULATION ---
+             sp500_changes = {}
+             try:
+                 print("Fetching ^GSPC for RS comparison...")
+                 sp500_df = stock_service.get_stock_data('^GSPC', period='2y', interval='1d', force_refresh=True)
+                 if not sp500_df.empty:
+                     sp500_close = sp500_df['Close']
+                     sp500_curr = sp500_close.iloc[-1]
+                     
+                     def calc_sp_change(days):
+                        if len(sp500_close) > days:
+                            idx = -(days + 1)
+                            if abs(idx) <= len(sp500_close):
+                                prev = sp500_close.iloc[idx]
+                                if prev != 0: return ((sp500_curr - prev) / prev) * 100.0
+                        return None
+                        
+                     sp500_changes[5] = calc_sp_change(5)
+                     sp500_changes[20] = calc_sp_change(20)
+                     sp500_changes[50] = calc_sp_change(50)
+                     sp500_changes[200] = calc_sp_change(200)
+             except Exception as e:
+                 print(f"Failed to fetch SP500: {e}")
+             # ------------------------------------------
              
              # Process in chunks to commit periodically
              chunk_size = 50
@@ -148,6 +193,43 @@ class UpdateManager:
                          close = df['Close']
                          current_price = close.iloc[-1]
                          
+                         # --- Chart Data Population ---
+                         # Extract last 40 days for mini chart
+                         # Columns needed: Open, High, Low, Close, Volume
+                         try:
+                             if not df.empty:
+                                 # Calculate SMAs for the whole df first
+                                 df['SMA5'] = df['Close'].rolling(window=5).mean()
+                                 df['SMA20'] = df['Close'].rolling(window=20).mean()
+                                 df['SMA50'] = df['Close'].rolling(window=50).mean()
+                                 df['SMA100'] = df['Close'].rolling(window=100).mean()
+                                 df['SMA200'] = df['Close'].rolling(window=200).mean()
+
+                                 chart_df = df.tail(40).copy()
+                                 
+                                 chart_data = []
+                                 for dt, row in chart_df.iterrows():
+                                     chart_data.append({
+                                         "d": dt.strftime('%Y-%m-%d'),
+                                         "o": float(row['Open']),
+                                         "h": float(row['High']),
+                                         "l": float(row['Low']),
+                                         "c": float(row['Close']),
+                                         "v": int(row['Volume']),
+                                         "sap": [ # SMAs Array
+                                             float(row['SMA5']) if pd.notna(row['SMA5']) else None,
+                                             float(row['SMA20']) if pd.notna(row['SMA20']) else None,
+                                             float(row['SMA50']) if pd.notna(row['SMA50']) else None,
+                                             float(row['SMA200']) if pd.notna(row['SMA200']) else None,
+                                             float(row['SMA100']) if pd.notna(row['SMA100']) else None
+                                         ]
+                                     })
+                                 import json
+                                 stock.daily_chart_data = json.dumps(chart_data)
+                         except Exception as e:
+                             print(f"Chart data error {sym}: {e}")
+                         # -----------------------------
+                         
                          # Calcs
                          def calc_change(days):
                             if len(close) > days:
@@ -162,6 +244,19 @@ class UpdateManager:
                          stock.change_percentage_20d = calc_change(20)
                          stock.change_percentage_50d = calc_change(50)
                          stock.change_percentage_200d = calc_change(200)
+
+                         # Save Current Price
+                         stock.current_price = float(current_price)
+                         
+                         # Calculate RS (Stock Change - SP500 Change)
+                         if stock.change_percentage_5d is not None and sp500_changes.get(5) is not None:
+                             stock.rs_5d = stock.change_percentage_5d - sp500_changes[5]
+                         if stock.change_percentage_20d is not None and sp500_changes.get(20) is not None:
+                             stock.rs_20d = stock.change_percentage_20d - sp500_changes[20]
+                         if stock.change_percentage_50d is not None and sp500_changes.get(50) is not None:
+                             stock.rs_50d = stock.change_percentage_50d - sp500_changes[50]
+                         if stock.change_percentage_200d is not None and sp500_changes.get(200) is not None:
+                             stock.rs_200d = stock.change_percentage_200d - sp500_changes[200]
                          
                          # ATR
                          try:
@@ -184,6 +279,31 @@ class UpdateManager:
                                 val = func(df)
                                 setattr(stock, f"signal_{name}", int(val))
                          except: pass
+                         # Store Deviations
+                         try:
+                             if 'Deviation_MA5' in df.columns and pd.notna(df['Deviation_MA5'].iloc[-1]):
+                                 stock.deviation_5ma_pct = float(df['Deviation_MA5'].iloc[-1])
+                             if 'Deviation_MA20' in df.columns and pd.notna(df['Deviation_MA20'].iloc[-1]):
+                                 stock.deviation_20ma_pct = float(df['Deviation_MA20'].iloc[-1])
+                             if 'Deviation_MA50' in df.columns and pd.notna(df['Deviation_MA50'].iloc[-1]):
+                                 stock.deviation_50ma_pct = float(df['Deviation_MA50'].iloc[-1])
+                             if 'Deviation_MA200' in df.columns and pd.notna(df['Deviation_MA200'].iloc[-1]):
+                                 stock.deviation_200ma_pct = float(df['Deviation_MA200'].iloc[-1])
+                         except Exception as e:
+                             print(f"Deviation save error {sym}: {e}")
+
+                         # Store Slopes
+                         try:
+                             if 'Slope_MA5' in df.columns and pd.notna(df['Slope_MA5'].iloc[-1]):
+                                 stock.slope_5ma = float(df['Slope_MA5'].iloc[-1])
+                             if 'Slope_MA20' in df.columns and pd.notna(df['Slope_MA20'].iloc[-1]):
+                                 stock.slope_20ma = float(df['Slope_MA20'].iloc[-1])
+                             if 'Slope_MA50' in df.columns and pd.notna(df['Slope_MA50'].iloc[-1]):
+                                 stock.slope_50ma = float(df['Slope_MA50'].iloc[-1])
+                             if 'Slope_MA200' in df.columns and pd.notna(df['Slope_MA200'].iloc[-1]):
+                                 stock.slope_200ma = float(df['Slope_MA200'].iloc[-1])
+                         except Exception as e:
+                             print(f"Slope save error {sym}: {e}")
 
                          stock.updated_at = datetime.utcnow()
                          session.add(stock)

@@ -67,16 +67,11 @@ class StockService:
                 days_threshold = 10 if interval == '1wk' else 3
                 
                 if last_date >= today - timedelta(days=days_threshold):
-                    # Cache integrity check for Weekly
-                    if interval == '1wk' and len(df) > 2:
-                        # Check last 2 rows diff
-                        dates = df.index[-2:]
-                        if len(dates) == 2:
-                            diff_days = (dates[1] - dates[0]).days
-                            if diff_days < 5:
-                                logger.warning(f"Cached 1wk data for {symbol} looks like daily (diff={diff_days} days). Invalidating cache.")
-                                raise ValueError("Invalid cache frequency")
-
+                     # If weekly, apply manual correction to ensure latest data is full
+                    if interval == '1wk':
+                        df = self._correct_weekly_candle(symbol, df)
+                    
+                    df = self._add_technical_indicators(df)
                     return df
                 
                 pass 
@@ -95,14 +90,17 @@ class StockService:
             # interval: 1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo
             df = yf.download(ticker_symbol, period=period, interval=interval, progress=False, auto_adjust=True)
             if df.empty:
-                logger.warning(f"No data for {symbol}")
-                return pd.DataFrame()
+                # Manual Weekly Correction for empty result (try to build from daily)
+                if interval == '1wk':
+                    df = self._correct_weekly_candle(symbol, df)
+                
+                # If still empty after correction attempt, return
+                if df.empty:
+                    logger.warning(f"No data for {symbol}")
+                    return pd.DataFrame()
             
-            # Normalize logic (MA calculation)
+            # Enrich with indicators
             df = self._add_technical_indicators(df)
-            
-            # Save to cache
-            df.to_parquet(file_path)
             return df
         except Exception as e:
             logger.error(f"Error fetching data for {symbol}: {e}")
@@ -128,6 +126,20 @@ class StockService:
             data['Close_MA20'] = data['Close'].rolling(window=20).mean()
             data['Close_MA50'] = data['Close'].rolling(window=50).mean()
             data['Close_MA200'] = data['Close'].rolling(window=200).mean()
+
+            # Calculate Deviations ((Close - MA) / MA * 100)
+            data['Deviation_MA5'] = ((data['Close'] - data['Close_MA5']) / data['Close_MA5']) * 100
+            data['Deviation_MA20'] = ((data['Close'] - data['Close_MA20']) / data['Close_MA20']) * 100
+            data['Deviation_MA50'] = ((data['Close'] - data['Close_MA50']) / data['Close_MA50']) * 100
+            data['Deviation_MA200'] = ((data['Close'] - data['Close_MA200']) / data['Close_MA200']) * 100
+            
+            # Calculate Slopes (Daily Change of MA)
+            # User Request: (Slope / Close) * 100 * 100 = (Slope / Close) * 10000
+            cols = [('Close_MA5', 'Slope_MA5'), ('Close_MA20', 'Slope_MA20'), ('Close_MA50', 'Slope_MA50'), ('Close_MA200', 'Slope_MA200')]
+            for ma_col, slope_col in cols:
+                # diff / close * 10000
+                data[slope_col] = ((data[ma_col] - data[ma_col].shift(1)) / data['Close']) * 10000
+
             if 'Volume' in data.columns:
                 data['Volume_MA50'] = data['Volume'].rolling(window=50).mean()
                 data['Volume_MA200'] = data['Volume'].rolling(window=200).mean()
@@ -137,6 +149,55 @@ class StockService:
         data = data.round(2)
         data.fillna(0, inplace=True)
         return data
+
+    def _correct_weekly_candle(self, symbol, df):
+        """
+        Manually correct the last weekly candle using recent daily data.
+        This handles cases where yfinance returns incomplete weekly data (e.g. up to Wed).
+        """
+        try:
+             # Handle Japanese stocks (4 digits) -> Append .T
+            ticker_symbol = symbol
+            if symbol.isdigit() and len(symbol) == 4:
+                ticker_symbol = f"{symbol}.T"
+
+            df_daily = yf.download(ticker_symbol, period="1mo", interval="1d", progress=False, auto_adjust=True)
+            if not df_daily.empty:
+                # Ensure standard columns level
+                if isinstance(df_daily.columns, pd.MultiIndex):
+                    df_daily.columns = df_daily.columns.get_level_values(0)
+                
+                last_weekly_date = df.index[-1].date()
+                # Find the start of that week (assuming Monday)
+                week_start = last_weekly_date - timedelta(days=last_weekly_date.weekday())
+                
+                # Get daily data for this week
+                this_week_daily = df_daily[df_daily.index.date >= week_start]
+                
+                if not this_week_daily.empty and len(this_week_daily) > 0:
+                    # Re-aggregate
+                    new_open = this_week_daily['Open'].iloc[0]
+                    new_high = this_week_daily['High'].max()
+                    new_low = this_week_daily['Low'].min()
+                    new_close = this_week_daily['Close'].iloc[-1]
+                    new_volume = this_week_daily['Volume'].sum()
+                    
+                    # Log correction
+                    logger.info(f"Correcting weekly candle for {symbol} ({last_weekly_date}): "
+                                f"Open {df['Open'].iloc[-1]:.2f}->{new_open:.2f}, "
+                                f"Close {df['Close'].iloc[-1]:.2f}->{new_close:.2f}")
+                    
+                    # Replace last row
+                    df.iloc[-1, df.columns.get_loc('Open')] = new_open
+                    df.iloc[-1, df.columns.get_loc('High')] = new_high
+                    df.iloc[-1, df.columns.get_loc('Low')] = new_low
+                    df.iloc[-1, df.columns.get_loc('Close')] = new_close
+                    df.iloc[-1, df.columns.get_loc('Volume')] = new_volume
+                    
+        except Exception as e:
+            logger.error(f"Error correcting weekly candle for {symbol}: {e}")
+            
+        return df
 
     def calculate_performance_metrics(self, df):
         """

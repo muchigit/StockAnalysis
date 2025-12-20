@@ -11,15 +11,20 @@ class Importer:
     def __init__(self):
         pass
         
+    def log_debug(self, msg):
+        print(msg)
+
     def import_finviz_ibd_files(self, file_paths: list[str]):
         """
         Import list of files (Finviz, IBD).
         Expected columns vary, but we need Symbol.
         """
+        self.log_debug(f"Starting import for files: {file_paths}")
         total_imported = 0
         with Session(engine) as session:
             for file_path in file_paths:
                 try:
+                    self.log_debug(f"Processing file: {file_path}")
                     # Determine loader based on extension
                     if file_path.endswith('.csv'):
                         df = pd.read_csv(file_path)
@@ -30,34 +35,38 @@ class Importer:
                             # Read header scan
                             df_raw = pd.read_excel(file_path, header=None, nrows=20)
                             header_idx = -1
+                            self.log_debug("Scanning for header row...")
                             for i, row in df_raw.iterrows():
                                 row_str = [str(val).strip().lower() for val in row.values]
                                 # Strict match for header columns to avoid matching Description text
-                                if any(x in row_str for x in ['symbol', 'ticker', 'company symbol', 'code', '銘柄コード']):
+                                if any(x in row_str for x in ['symbol', 'ticker', 'company symbol', 'code', '銘柄コード', 'ティッカー', 'stock symbol', 'ticker symbol']):
                                     header_idx = i
+                                    self.log_debug(f"Header found at alias match row {i}: {row_str}")
                                     break
                             
                             if header_idx != -1:
-                                print(f"Found header at index {header_idx}")
+                                self.log_debug(f"Found header at index {header_idx}")
                                 # Re-read full file with correct header
                                 df = pd.read_excel(file_path, header=header_idx)
                             else:
-                                print("No header row found by scan, using default.")
+                                self.log_debug("No header row found by scan, using default.")
                                 df = pd.read_excel(file_path) # Fallback to default
                                 
                         except Exception as e:
-                            print(f"Excel read error: {e}")
+                            self.log_debug(f"Excel read error: {e}")
                             # Sometimes they are CSVs named xls?
                             df = pd.read_csv(file_path, sep='\t') # Try tab?
                             
                     # Normalize columns if needed
                     # We look for 'Symbol', 'Ticker', 'Company Symbol'
                     symbol_col = None
-                    print(f"Columns found: {df.columns.tolist()}")
+                    self.log_debug(f"Columns found: {df.columns.tolist()}")
                     for col in df.columns:
                         c_lower = str(col).lower().strip()
-                        if c_lower in ['symbol', 'ticker', 'company symbol', 'code', '銘柄コード']:
+                        self.log_debug(f"[Import] Checking col: '{col}' -> '{c_lower}'")
+                        if c_lower in ['symbol', 'ticker', 'company symbol', 'code', '銘柄コード', 'ティッカー', 'stock symbol', 'ticker symbol']:
                             symbol_col = col
+                            self.log_debug(f"[Import] Match found: {symbol_col}")
                             break
 
                     
@@ -151,10 +160,20 @@ class Importer:
                             stock.ibd_rating_date = found_date
                             session.add(stock)
                         
-                        if 'Market Cap' in row: 
-                            # Parse market cap e.g. "10.5B"
-                            # For now just store raw string or parsing logic
-                            pass
+
+                        if 'Market Cap' in row and pd.notna(row['Market Cap']):
+                            val = str(row['Market Cap']).strip().upper()
+                            try:
+                                if val.endswith('B'):
+                                    stock.market_cap = float(val.replace('B', '')) * 1e9
+                                elif val.endswith('M'):
+                                    stock.market_cap = float(val.replace('M', '')) * 1e6
+                                elif val.endswith('K'):
+                                    stock.market_cap = float(val.replace('K', '')) * 1e3
+                                else:
+                                    stock.market_cap = float(val)
+                            except:
+                                pass # Keep None if parse fails
                         
                         stock.updated_at = datetime.utcnow()
                         total_imported += 1

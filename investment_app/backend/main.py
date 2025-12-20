@@ -21,7 +21,7 @@ app.add_middleware(
 )
 
 app.include_router(stocks.router)
-# app.include_router(automation.router)
+app.include_router(automation.router)
 from .routers import filters, system
 app.include_router(filters.router)
 app.include_router(system.router)
@@ -29,6 +29,8 @@ from .routers import prompts
 app.include_router(prompts.router)
 from .routers import automation_router
 app.include_router(automation_router.router)
+from .routers import views
+app.include_router(views.router)
 # from .routers import automation_router_v2
 # app.include_router(automation_router_v2.router)
 
@@ -82,3 +84,5 @@ def start_scheduler():
 def read_root():
     return {"message": "Welcome to Investment Management System API"}
 
+
+# Trigger Reload

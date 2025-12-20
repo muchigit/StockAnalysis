@@ -26,23 +26,23 @@ export default function SystemStatusBanner() {
     // Calculate percentage
     const percentage = status.total > 0 ? Math.round((status.progress / status.total) * 100) : 0;
 
-    let bgColor = "bg-gray-800 text-gray-400 border-b border-gray-700";
+    let bgColor = "bg-gray-800/50"; // Transparent default
     let statusText = "Ready";
 
     if (status.status === 'running') {
-        bgColor = "bg-blue-600 text-white";
-        statusText = "Updating Data...";
+        bgColor = "bg-blue-900/40 border-blue-500/30";
+        statusText = "Updating...";
     }
     if (status.status === 'waiting_retry') {
-        bgColor = "bg-yellow-600 text-white";
-        statusText = "Retrying in 10m...";
+        bgColor = "bg-yellow-900/40 border-yellow-500/30";
+        statusText = "Retrying...";
     }
     if (status.status === 'completed') {
-        bgColor = "bg-green-800 text-green-200 border-b border-green-700";
-        statusText = "Data Updated";
+        bgColor = "bg-green-900/20 border-green-500/30";
+        statusText = "Updated";
     }
     if (status.status === 'error') {
-        bgColor = "bg-red-900 text-red-200";
+        bgColor = "bg-red-900/40 border-red-500/30";
         statusText = "Error";
     }
 
@@ -58,47 +58,47 @@ export default function SystemStatusBanner() {
     };
 
     return (
-        <div className={`${bgColor} px-4 py-2 text-sm flex items-center justify-between transition-colors duration-500`}>
-            <div className="flex items-center gap-4">
-                <span className={`font-bold uppercase tracking-wider text-xs px-2 py-0.5 rounded ${status.status === 'running' ? 'bg-white/20' : 'bg-gray-700/50'}`}>
+        <div className={`flex items-center gap-4 text-xs ${bgColor} px-3 py-1.5 rounded-lg border border-gray-700/50 shadow-sm transition-all duration-500`}>
+            {/* Status & Date */}
+            <div className="flex items-center gap-3">
+                <span className={`font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${status.status === 'running' ? 'bg-blue-500/20 text-blue-200' : 'bg-gray-700/50 text-gray-400'}`}>
                     {statusText}
                 </span>
 
-                {status.status === 'waiting_retry' && <span>{status.message}</span>}
+                {status.status === 'waiting_retry' && <span className="text-yellow-400">{status.message}</span>}
 
                 {(status.status === 'idle' || status.status === 'completed') && (
-                    <span className="text-xs opacity-70">
-                        Latest Data: {status.last_completed ? new Date(status.last_completed).toLocaleString() : 'Never'}
+                    <span className="text-gray-500 hidden xl:inline">
+                        Last: {status.last_completed ? new Date(status.last_completed).toLocaleString() : 'Never'}
                     </span>
                 )}
             </div>
 
-            <div className="flex items-center gap-4">
-                {(status.status === 'running' || status.status === 'waiting_retry') && (
-                    <div className="flex items-center gap-2 min-w-[200px]">
-                        <span className="text-xs opacity-80 mr-2">
-                            {status.progress} / {status.total}
-                        </span>
-                        <div className="w-24 bg-black/20 rounded-full h-1.5 overflow-hidden">
-                            <div
-                                className="bg-white/90 h-full rounded-full transition-all duration-500"
-                                style={{ width: `${percentage}%` }}
-                            />
-                        </div>
+            {/* Progress Bar */}
+            {(status.status === 'running' || status.status === 'waiting_retry') && (
+                <div className="flex items-center gap-2 min-w-[150px]">
+                    <span className="opacity-80">
+                        {status.progress} / {status.total}
+                    </span>
+                    <div className="w-20 bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div
+                            className="bg-blue-400 h-full rounded-full transition-all duration-500"
+                            style={{ width: `${percentage}%` }}
+                        />
                     </div>
-                )}
+                </div>
+            )}
 
-                {/* Manual Update Button */}
-                {(status.status === 'idle' || status.status === 'completed' || status.status === 'error') && (
-                    <button
-                        onClick={handleManualUpdate}
-                        className="bg-white/10 hover:bg-white/20 text-white rounded px-3 py-1 text-xs border border-white/20 transition flex items-center gap-1"
-                        title="Run data update immediately"
-                    >
-                        <span>↻</span> Manual Update
-                    </button>
-                )}
-            </div>
+            {/* Manual Update Button (Compact) */}
+            {(status.status === 'idle' || status.status === 'completed' || status.status === 'error') && (
+                <button
+                    onClick={handleManualUpdate}
+                    className="hover:bg-white/10 text-gray-300 hover:text-white rounded px-2 py-1 transition flex items-center gap-1"
+                    title="データの更新を実行"
+                >
+                    <span className="text-lg">↻</span>
+                </button>
+            )}
         </div>
     );
 }

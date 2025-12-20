@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { fetchStockDetail, fetchStockChart, fetchStockSignals, fetchStockHistory, fetchStockNote, saveStockNote, fetchStockAnalysis, deleteStock, Stock, ChartData, TradeHistory, StockNote, AnalysisResult, updateStock, fetchPrompts, fetchStockPriceHistory, GeminiPrompt, openFile } from '@/lib/api';
+import { fetchStockDetail, fetchStockChart, fetchStockSignals, fetchStockHistory, fetchStockNote, saveStockNote, fetchStockAnalysis, deleteStock, Stock, ChartData, TradeHistory, StockNote, AnalysisResult, updateStock, fetchPrompts, fetchStockPriceHistory, GeminiPrompt, openFile, generateText } from '@/lib/api';
+import { addResearchTicker } from '@/lib/research-storage';
+import { SIGNAL_LABELS } from '@/lib/signals';
 import { StockChart } from '@/components/StockChart';
+import Toast from '@/components/Toast';
 import Link from 'next/link';
 import { useTranslation } from '@/lib/i18n';
 import { useParams, useRouter } from 'next/navigation';
@@ -29,6 +32,8 @@ export default function StockDetailPage() {
     const [prompts, setPrompts] = useState<GeminiPrompt[]>([]);
     const [selectedPromptId, setSelectedPromptId] = useState<number | string>("");
     const [copyingPrompt, setCopyingPrompt] = useState(false);
+    const [toastMsg, setToastMsg] = useState('');
+    const [runningGemini, setRunningGemini] = useState(false);
 
     useEffect(() => {
         if (symbol) {
@@ -59,7 +64,16 @@ export default function StockDetailPage() {
             setLastSavedNote(content);
             setAnalysis(a);
             setPrompts(p); // Assuming 8th element is prompts
-            if (p && p.length > 0) setSelectedPromptId(p[0].id);
+
+            // Restore last selected prompt
+            const lastId = localStorage.getItem('lastSelectedPromptId');
+            if (p && p.length > 0) {
+                if (lastId && p.find(item => item.id.toString() === lastId)) {
+                    setSelectedPromptId(lastId);
+                } else {
+                    setSelectedPromptId(p[0].id.toString());
+                }
+            }
         } catch (e) {
             console.error(e);
         } finally {
@@ -120,6 +134,53 @@ export default function StockDetailPage() {
         }
     }
 
+    async function handleRunGemini() {
+        if (!stock || !selectedPromptId) return;
+
+        const pData = prompts.find(p => p.id === Number(selectedPromptId));
+        if (!pData) return;
+
+        if (!confirm("プロンプトを実行してGeminiで生成しますか？\n(約20-30秒かかります)")) return;
+
+        setRunningGemini(true);
+        try {
+            let content = pData.content;
+            // Basic vars
+            content = content.replace(/%SYMBOL%/g, stock.symbol);
+            content = content.replace(/%COMPANYNAME%/g, stock.company_name);
+            content = content.replace(/%DATE%/g, new Date().toISOString().split('T')[0]);
+
+            // Stock Data
+            if (content.includes('%STOCKDATA%')) {
+                const h = await fetchStockPriceHistory(stock.symbol, 100);
+                if (h && h.length > 0) {
+                    const header = Object.keys(h[0]).join(',') + "\n";
+                    const rows = h.map(row => Object.values(row).join(',')).join("\n");
+                    content = content.replace(/%STOCKDATA%/g, header + rows);
+                } else {
+                    content = content.replace(/%STOCKDATA%/g, "No Data");
+                }
+            }
+
+            const text = await generateText(content);
+
+            // Append to note
+            const timestamp = new Date().toLocaleString();
+            const newNote = note ? (note + `\n\n--- Gemini Analysis (${timestamp}) ---\n` + text) : (`--- Gemini Analysis (${timestamp}) ---\n` + text);
+
+            setNote(newNote);
+            await saveStockNote(stock.symbol, newNote);
+            setLastSavedNote(newNote);
+            alert("Analysis added to note!");
+
+        } catch (e) {
+            console.error(e);
+            alert("Gemini Run Failed: " + e);
+        } finally {
+            setRunningGemini(false);
+        }
+    }
+
     // Process markers from history (aggregated by date)
     const markers: SeriesMarker<string>[] = (() => {
         const grouped: Record<string, { type: string, qty: number, totalVal: number }> = {};
@@ -177,18 +238,19 @@ export default function StockDetailPage() {
 
     return (
         <main className="min-h-screen bg-gray-900 text-white pb-20">
+            {toastMsg && <Toast message={toastMsg} onClose={() => setToastMsg('')} />}
             {/* Sticky Header with Back Link */}
             <div className="sticky top-0 z-50 bg-gray-900/95 backdrop-blur border-b border-gray-800 px-8 py-4 flex justify-between items-center shadow-md">
                 <div className="flex items-center gap-4">
                     <h1 className="text-2xl font-bold">{stock.symbol} <span className="text-lg font-normal text-gray-400">{stock.company_name}</span></h1>
                     {stock.asset_type !== 'index' && (
                         <>
-                            <span className="px-3 py-1 bg-gray-800 rounded text-sm text-gray-300 border border-gray-700 hover:bg-gray-700 transition-colors cursor-default" title="Sector">{stock.sector}</span>
-                            <span className="px-3 py-1 bg-gray-800 rounded text-sm text-gray-400 border border-gray-700 hover:bg-gray-700 transition-colors cursor-default" title="Industry">{stock.industry}</span>
+                            <span className="px-3 py-1 bg-gray-800 rounded text-sm text-gray-300 border border-gray-700 hover:bg-gray-700 transition-colors cursor-default" title={t('sector') || 'Sector'}>{stock.sector}</span>
+                            <span className="px-3 py-1 bg-gray-800 rounded text-sm text-gray-400 border border-gray-700 hover:bg-gray-700 transition-colors cursor-default" title={t('industry') || 'Industry'}>{stock.industry}</span>
                             {/* Display Triggered Signals */}
                             {Object.entries(signals || {}).filter(([_, val]) => val === 1).map(([key, _]) => (
                                 <span key={key} className="px-3 py-1 bg-green-900/50 text-green-400 border border-green-700/50 rounded text-sm font-bold uppercase">
-                                    {key.replace(/_/g, ' ')}
+                                    {SIGNAL_LABELS[`signal_${key}`] || key.replace(/_/g, ' ')}
                                 </span>
                             ))}
                         </>
@@ -196,7 +258,7 @@ export default function StockDetailPage() {
 
                     {/* First Import Date Badge */}
                     {stock.asset_type !== 'index' && stock.first_import_date && (
-                        <span className="px-3 py-1 bg-gray-800 text-gray-400 border border-gray-700/50 rounded text-sm" title="First Import Date">
+                        <span className="px-3 py-1 bg-gray-800 text-gray-400 border border-gray-700/50 rounded text-sm" title={t('importedAt') || 'First Import Date'}>
                             📅 {new Date(stock.first_import_date).toLocaleDateString()}
                         </span>
                     )}
@@ -221,6 +283,17 @@ export default function StockDetailPage() {
                         <span className="text-sm bg-blue-600 text-white px-2 py-1 rounded font-bold">T</span>
                     </a>
 
+                    <button
+                        onClick={() => {
+                            addResearchTicker(stock.symbol);
+                            setToastMsg(t('addedToResearch').replace('{{symbol}}', stock.symbol));
+                        }}
+                        className="opacity-80 hover:opacity-100 transition mr-4"
+                        title={t('addToDeepResearch')}
+                    >
+                        <span className="text-sm bg-purple-600 text-white px-2 py-1 rounded font-bold">🧠</span>
+                    </button>
+
                     <div className="mr-4">
                         <input
                             type="text"
@@ -236,38 +309,36 @@ export default function StockDetailPage() {
                     </div>
 
                     <Link
-                        href={stock.asset_type === 'index' ? '/?tab=index' : '/?tab=stock'}
-                        className="text-gray-400 hover:text-white font-bold flex items-center gap-2"
+                        href="/"
+                        className="text-gray-400 hover:text-white font-bold flex items-center gap-2 mr-4"
                     >
                         {t('backToDashboard')} &rarr;
                     </Link>
+
+                    {/* Delete Button (Far Right) */}
+                    <button
+                        onClick={async () => {
+                            if (confirm(t('confirmDeleteStock') || `Are you sure you want to delete ${stock.symbol}?`)) {
+                                try {
+                                    await deleteStock(stock.symbol);
+                                    router.push('/');
+                                } catch (e) {
+                                    alert('Failed to delete');
+                                }
+                            }
+                        }}
+                        className="px-3 py-1 bg-red-900/50 text-red-400 border border-red-700 hover:bg-red-800 transition-colors rounded text-sm font-bold ml-4"
+                    >
+                        {t('delete') || 'Delete'}
+                    </button>
                 </div>
             </div>
 
-            <div className="flex justify-end px-8 mb-4">
-                <button
-                    onClick={async () => {
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        if (confirm(t('confirmDeleteStock' as any) || `Are you sure you want to delete ${stock.symbol}? This will remove all data including notes and history.`)) {
-                            try {
-                                await deleteStock(stock.symbol);
-                                router.push('/');
-                            } catch (e) {
-                                alert('Failed to delete stock');
-                                console.error(e);
-                            }
-                        }
-                    }}
-                    className="text-red-500 hover:text-red-400 text-sm font-bold opacity-60 hover:opacity-100 transition"
-                >
-                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                    {t('deleteStock' as any) || 'Delete Stock'} 🗑️
-                </button>
-            </div>
-
-            <div className="space-y-6 px-8">
+            {/* Content Grid */}
+            {/* Content Grid */}
+            <div className="space-y-6 px-8 mt-4">
                 {/* Compact Dashboard Metrics Summary */}
-                <div className="flex flex-wrap gap-x-6 gap-y-2 items-center bg-gray-800 rounded-xl px-6 py-3 border border-gray-700 text-sm shadow-sm">
+                <div className="flex flex-wrap gap-x-4 gap-y-2 items-center bg-gray-800 rounded-xl px-4 py-2 border border-gray-700 text-xs shadow-sm">
                     {stock.asset_type !== 'index' && (
                         <>
                             {/* Status & Qty */}
@@ -282,7 +353,7 @@ export default function StockDetailPage() {
                                 </span>
                             </div>
 
-                            <div className="hidden md:block w-px h-4 bg-gray-600"></div>
+                            <div className="hidden md:block w-px h-3 bg-gray-600"></div>
 
                             {/* P&L */}
                             <div className="flex items-center gap-2">
@@ -292,61 +363,71 @@ export default function StockDetailPage() {
                                 </span>
                             </div>
 
-                            <div className="hidden md:block w-px h-4 bg-gray-600"></div>
+                            <div className="hidden md:block w-px h-3 bg-gray-600"></div>
 
-                            {/* Last Buy */}
+                            {/* IBD Ratings (Compact - BEFORE Flags) */}
                             <div className="flex items-center gap-2">
-                                <span className="text-gray-500">{t('lastBuy')}:</span>
-                                <span className="font-mono text-gray-300">{stock.last_buy_date || '-'}</span>
+                                <IBDRatingInput
+                                    label="CR"
+                                    initialValue={stock.composite_rating}
+                                    onSave={async (val) => {
+                                        const updated = await updateStock(stock.symbol, { composite_rating: val });
+                                        setStock(prev => prev ? { ...prev, ...updated } : null);
+                                    }}
+                                    colorClass="text-yellow-500"
+                                />
+                                <IBDRatingInput
+                                    label="RS"
+                                    initialValue={stock.rs_rating}
+                                    onSave={async (val) => {
+                                        const updated = await updateStock(stock.symbol, { rs_rating: val });
+                                        setStock(prev => prev ? { ...prev, ...updated } : null);
+                                    }}
+                                    colorClass="text-blue-400"
+                                />
                             </div>
 
-                            <div className="hidden md:block w-px h-4 bg-gray-600"></div>
+                            <div className="hidden md:block w-px h-3 bg-gray-600"></div>
 
-                            {/* Last Sell */}
-                            <div className="flex items-center gap-2">
-                                <span className="text-gray-500">{t('lastSell')}:</span>
-                                <span className="font-mono text-gray-300">{stock.last_sell_date || '-'}</span>
-                            </div>
-
-                            <div className="hidden md:block w-px h-4 bg-gray-600"></div>
                         </>
                     )}
 
                     {/* Changes (Grouped) */}
+                    {/* Changes (Grouped) */}
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-1" title="1D Change">
-                            <span className="text-gray-500">1D:</span>
-                            <span className={`font-mono ${(stock.change_percentage_1d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_1d || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
+                            <span className="text-gray-500 text-sm">前日比:</span>
+                            <span className={`font-mono text-sm ${(stock.change_percentage_1d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_1d || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
                                 {stock.change_percentage_1d ? `${stock.change_percentage_1d > 0 ? '+' : ''}${stock.change_percentage_1d.toFixed(1)}%` : '-'}
                             </span>
                         </div>
                         <div className="flex items-center gap-1" title={t('change5d')}>
-                            <span className="text-gray-500">5D:</span>
-                            <span className={`font-mono ${(stock.change_percentage_5d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_5d || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
+                            <span className="text-gray-500 text-sm">5日比:</span>
+                            <span className={`font-mono text-sm ${(stock.change_percentage_5d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_5d || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
                                 {stock.change_percentage_5d ? `${stock.change_percentage_5d > 0 ? '+' : ''}${stock.change_percentage_5d.toFixed(1)}%` : '-'}
                             </span>
                         </div>
                         <div className="flex items-center gap-1" title={t('change20d')}>
-                            <span className="text-gray-500">20D:</span>
-                            <span className={`font-mono ${(stock.change_percentage_20d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_20d || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
+                            <span className="text-gray-500 text-sm">20日比:</span>
+                            <span className={`font-mono text-sm ${(stock.change_percentage_20d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_20d || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
                                 {stock.change_percentage_20d ? `${stock.change_percentage_20d > 0 ? '+' : ''}${stock.change_percentage_20d.toFixed(1)}%` : '-'}
                             </span>
                         </div>
                         <div className="flex items-center gap-1" title={t('change50d')}>
-                            <span className="text-gray-500">50D:</span>
-                            <span className={`font-mono ${(stock.change_percentage_50d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_50d || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
+                            <span className="text-gray-500 text-sm">50日比:</span>
+                            <span className={`font-mono text-sm ${(stock.change_percentage_50d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_50d || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
                                 {stock.change_percentage_50d ? `${stock.change_percentage_50d > 0 ? '+' : ''}${stock.change_percentage_50d.toFixed(1)}%` : '-'}
                             </span>
                         </div>
                         <div className="flex items-center gap-1" title={t('change200d')}>
-                            <span className="text-gray-500">200D:</span>
-                            <span className={`font-mono ${(stock.change_percentage_200d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_200d || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
+                            <span className="text-gray-500 text-sm">200日比:</span>
+                            <span className={`font-mono text-sm ${(stock.change_percentage_200d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_200d || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
                                 {stock.change_percentage_200d ? `${stock.change_percentage_200d > 0 ? '+' : ''}${stock.change_percentage_200d.toFixed(1)}%` : '-'}
                             </span>
                         </div>
                         <div className="flex items-center gap-1" title="ATR (14 days)">
-                            <span className="text-gray-500">ATR(14):</span>
-                            <span className="font-mono text-gray-300">
+                            <span className="text-gray-500 text-sm">ATR(14):</span>
+                            <span className="font-mono text-gray-300 text-sm">
                                 {stock.atr_14 ? (
                                     <>
                                         {stock.atr_14.toFixed(2)}
@@ -360,78 +441,42 @@ export default function StockDetailPage() {
                             </span>
                         </div>
                     </div>
+
+                    {/* SMA Deviations */}
+                    <div className="flex items-center gap-4 border-l border-gray-600 pl-4 sm:ml-4 mt-2 sm:mt-0">
+                        <div className="flex items-center gap-1" title="Deviation from 5-day SMA">
+                            <span className="text-gray-500 font-mono text-sm">{t('dev5')}:</span>
+                            <span className={`font-mono text-sm ${(stock.deviation_5ma_pct || 0) > 0 ? 'text-red-400' : (stock.deviation_5ma_pct || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
+                                {stock.deviation_5ma_pct ? `${stock.deviation_5ma_pct > 0 ? '+' : ''}${stock.deviation_5ma_pct.toFixed(2)}%` : '-'}
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-1" title="Deviation from 20-day SMA">
+                            <span className="text-gray-500 font-mono text-sm">{t('dev20')}:</span>
+                            <span className={`font-mono text-sm ${(stock.deviation_20ma_pct || 0) > 0 ? 'text-red-400' : (stock.deviation_20ma_pct || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
+                                {stock.deviation_20ma_pct ? `${stock.deviation_20ma_pct > 0 ? '+' : ''}${stock.deviation_20ma_pct.toFixed(2)}%` : '-'}
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-1" title="Deviation from 50-day SMA">
+                            <span className="text-gray-500 font-mono text-sm">{t('dev50')}:</span>
+                            <span className={`font-mono text-sm ${(stock.deviation_50ma_pct || 0) > 0 ? 'text-red-400' : (stock.deviation_50ma_pct || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
+                                {stock.deviation_50ma_pct ? `${stock.deviation_50ma_pct > 0 ? '+' : ''}${stock.deviation_50ma_pct.toFixed(2)}%` : '-'}
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-1" title="Deviation from 200-day SMA">
+                            <span className="text-gray-500 font-mono text-sm">{t('dev200')}:</span>
+                            <span className={`font-mono text-sm ${(stock.deviation_200ma_pct || 0) > 0 ? 'text-red-400' : (stock.deviation_200ma_pct || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
+                                {stock.deviation_200ma_pct ? `${stock.deviation_200ma_pct > 0 ? '+' : ''}${stock.deviation_200ma_pct.toFixed(2)}%` : '-'}
+                            </span>
+                        </div>
+                    </div>
                 </div>
 
 
 
 
-                {stock.asset_type !== 'index' && (
-                    <div className="bg-gray-800 rounded-xl px-6 py-4 border border-gray-700 shadow-sm flex items-center justify-between">
-                        <div className="flex items-center gap-8">
-                            <h3 className="text-gray-400 font-bold text-sm">IBD Ratings</h3>
-                            <div className="flex items-center gap-4">
-                                <IBDRatingInput
-                                    label="Composite"
-                                    initialValue={stock.composite_rating}
-                                    onSave={async (val) => {
-                                        try {
-                                            const updated = await updateStock(stock.symbol, { composite_rating: val });
-                                            console.log("Updated Comp:", updated);
-                                            setStock(prev => prev ? { ...prev, ...updated } : null);
-                                        } catch (e) {
-                                            console.error("Failed to update Comp", e);
-                                            alert("Update failed");
-                                        }
-                                    }}
-                                    colorClass="text-yellow-500"
-                                />
-                                <IBDRatingInput
-                                    label="RS Rating"
-                                    initialValue={stock.rs_rating}
-                                    onSave={async (val) => {
-                                        try {
-                                            const updated = await updateStock(stock.symbol, { rs_rating: val });
-                                            console.log("Updated RS:", updated);
-                                            setStock(prev => prev ? { ...prev, ...updated } : null);
-                                        } catch (e) {
-                                            console.error("Failed to update RS", e);
-                                            alert("Update failed");
-                                        }
-                                    }}
-                                    colorClass="text-blue-400"
-                                />
-                            </div>
-                        </div>
-                        <div className="text-xs text-gray-500">
-                            Updated: {stock.ibd_rating_date ? new Date(stock.ibd_rating_date).toLocaleDateString() : '-'}
-                        </div>
-                    </div>
-                )}
 
-                {/* Gemini Prompt Selector */}
-                {stock.asset_type !== 'index' && (
-                    <div className="bg-gray-800 rounded-xl px-6 py-4 border border-gray-700 shadow-sm mt-4 flex items-center gap-4">
-                        <div className="flex-1 flex items-center gap-4">
-                            <label className="text-gray-400 font-bold text-sm">Gemini Prompt:</label>
-                            <select
-                                value={selectedPromptId}
-                                onChange={(e) => setSelectedPromptId(e.target.value)}
-                                className="bg-gray-900 border border-gray-600 rounded px-3 py-1 text-white text-sm focus:outline-none focus:border-blue-500 flex-1 max-w-md"
-                            >
-                                {prompts.map(p => (
-                                    <option key={p.id} value={p.id}>{p.name}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <button
-                            onClick={handleCopyPrompt}
-                            disabled={copyingPrompt || !selectedPromptId}
-                            className="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded text-white font-bold text-sm flex items-center gap-2 disabled:opacity-50 transition"
-                        >
-                            {copyingPrompt ? 'Generating...' : 'Copy Prompt 📋'}
-                        </button>
-                    </div>
-                )}
+
+
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     <div className="lg:col-span-2 space-y-8">
@@ -449,6 +494,7 @@ export default function StockDetailPage() {
                                         colors={chartColors}
                                         smas={smaDaily}
                                         visibleBars={zoomDaily}
+                                        interval="1d"
                                     />
                                 </div>
                             ) : (
@@ -470,6 +516,7 @@ export default function StockDetailPage() {
                                         colors={chartColors}
                                         smas={smaWeekly}
                                         visibleBars={zoomWeekly}
+                                        interval="1wk"
                                     />
                                 </div>
                             ) : (
@@ -512,12 +559,12 @@ export default function StockDetailPage() {
                                                                         try {
                                                                             await openFile(a.file_path!);
                                                                         } catch (e) {
-                                                                            alert("Failed to open file: " + e);
+                                                                            alert(t('failedToOpenFile') + ": " + e);
                                                                         }
                                                                     }}
                                                                     className="text-xs bg-blue-900 text-blue-300 px-2 py-1 rounded hover:bg-blue-800 transition border border-blue-800"
                                                                 >
-                                                                    Open Report 📄
+                                                                    {t('openReport')} 📄
                                                                 </button>
                                                             )}
                                                         </div>
@@ -637,6 +684,42 @@ export default function StockDetailPage() {
                                             {t('noTradesFound')}
                                         </div>
                                     )}
+                                </div>
+                            )}
+
+                            {stock.asset_type !== 'index' && (
+                                <div className="mt-8 pt-8 border-t border-gray-700">
+                                    <div className="flex items-center gap-2">
+                                        <select
+                                            value={selectedPromptId}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                setSelectedPromptId(val);
+                                                localStorage.setItem('lastSelectedPromptId', val);
+                                            }}
+                                            className="bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-blue-500 flex-1 w-full"
+                                        >
+                                            {prompts.map(p => (
+                                                <option key={p.id} value={p.id}>{p.name}</option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            onClick={handleCopyPrompt}
+                                            disabled={copyingPrompt || !selectedPromptId}
+                                            className="px-2 py-1 bg-purple-600 hover:bg-purple-500 rounded text-white font-bold text-xs disabled:opacity-50 transition min-w-[30px]"
+                                            title={t('copyPrompt')}
+                                        >
+                                            {copyingPrompt ? '...' : '📋'}
+                                        </button>
+                                        <button
+                                            onClick={handleRunGemini}
+                                            disabled={runningGemini || !selectedPromptId}
+                                            className="px-2 py-1 bg-blue-600 hover:bg-blue-500 rounded text-white font-bold text-xs disabled:opacity-50 transition min-w-[30px]"
+                                            title="Run Gemini & Insert to Note"
+                                        >
+                                            {runningGemini ? '...' : '✨'}
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                         </div>

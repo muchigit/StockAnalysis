@@ -1,13 +1,21 @@
 "use client";
 
 import { useEffect, useState, useMemo, useRef } from 'react';
-import { fetchStocks, Stock, triggerImport, createStock } from '@/lib/api';
+import { fetchStocks, Stock, triggerImport, createStock, pickFile, updateStock, openAnalysisFolder } from '@/lib/api';
+import { addResearchTicker } from '@/lib/research-storage';
+import Toast from '@/components/Toast';
 import Link from 'next/link';
 import { useTranslation } from '@/lib/i18n';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import FilterDialog, { FilterCriteria } from '@/components/FilterDialog';
 import FilterSelect from '@/components/FilterSelect';
+import ColumnManager from '@/components/ColumnManager';
+import HeaderFilter, { ColumnFilterValue } from '@/components/HeaderFilter';
 import SystemStatusBanner from '@/components/SystemStatusBanner';
+import MiniCandleChart from '@/components/MiniCandleChart';
+
+
+const DEFAULT_COLUMNS = ['symbol', 'company_name', 'sector', 'industry', 'composite_rating', 'rs_rating', 'note', 'latest_analysis', 'status', 'change_percentage_1d', 'change_percentage_5d', 'change_percentage_20d', 'change_percentage_50d', 'change_percentage_200d', 'last_buy_date', 'last_sell_date', 'daily_chart_data', 'daily_chart_data_large', 'market_cap', 'realized_pl', 'first_import_date'];
 
 export default function Home() {
   const { t } = useTranslation();
@@ -15,131 +23,191 @@ export default function Home() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
 
-  // Initialize state from URL params
-  const initialSearch = searchParams.get('q') || '';
-  const initialFilter = (searchParams.get('filter') as 'all' | 'holding' | 'past' | 'trending') || 'all';
-  const initialSortKey = searchParams.get('sort') as keyof Stock | null;
-  const initialSortDir = (searchParams.get('order') as 'asc' | 'desc') || 'asc';
-  const initialSortConfig = initialSortKey ? { key: initialSortKey, direction: initialSortDir } : null;
+  // Column Definitions (Memoized for translation)
+  const ALL_COLUMNS = useMemo(() => [
+    { key: 'symbol', label: t('ticker') || 'ティッカー' },
+    { key: 'company_name', label: t('companyName') || '会社名' },
+    { key: 'sector', label: t('sector') || 'セクター' },
+    { key: 'industry', label: t('industry') || '業界' },
+    { key: 'composite_rating', label: 'CR' },
+    { key: 'rs_rating', label: 'RS' },
+    { key: 'note', label: t('note') || 'メモ', width: 200 },
+    { key: 'latest_analysis', label: t('analysis') || 'AI分析', width: 100 },
+    { key: 'status', label: t('status') || 'ステータス' },
+    { key: 'change_percentage_1d', label: '1D %' },
+    { key: 'change_percentage_5d', label: t('change5d') || '5D %' },
+    { key: 'change_percentage_20d', label: t('change20d') || '20D %' },
+    { key: 'change_percentage_50d', label: t('change50d') || '50D %' },
+    { key: 'change_percentage_200d', label: t('change200d') || '200D %' },
+    { key: 'last_buy_date', label: t('lastBuy') || '直近買付' },
+    { key: 'last_sell_date', label: t('lastSell') || '直近売却' },
+    { key: 'daily_chart_data', label: t('chart') || 'チャート', width: 200 },
+    { key: 'daily_chart_data_large', label: t('chartLarge') || 'チャート(大)', width: 400 },
+    { key: 'realized_pl', label: t('realizedPL') || '確定損益' },
+    { key: 'first_import_date', label: t('importedAt') || '取込日' },
+    { key: 'updated_at', label: 'Updated' },
+    { key: 'current_price', label: t('price') || '価格' },
+    { key: 'market_cap', label: 'Market Cap' },
+    { key: 'deviation_5ma_pct', label: t('dev5') || '乖離5MA' },
+    { key: 'deviation_20ma_pct', label: t('dev20') || '乖離20MA' },
+    { key: 'deviation_50ma_pct', label: t('dev50') || '乖離50MA' },
+    { key: 'deviation_200ma_pct', label: t('dev200') || '乖離200MA' },
+  ], [t]);
 
+  // State
   const [stocks, setStocks] = useState<Stock[]>([]);
-  const [importPath, setImportPath] = useState('');
-  const [msg, setMsg] = useState('');
-  const [searchQuery, setSearchQuery] = useState(initialSearch);
-  const [appliedQuery, setAppliedQuery] = useState(initialSearch); // Debounced search term for filtering
-  const [sortConfig, setSortConfig] = useState<{ key: keyof Stock; direction: 'asc' | 'desc' } | null>(initialSortConfig);
-  const [filterMode, setFilterMode] = useState<'all' | 'holding' | 'past' | 'trending' | 'notes' | 'star' | 'doubleCircle' | 'circle'>(initialFilter);
-  const [currentPage, setCurrentPage] = useState(1);
-  const ITEMS_PER_PAGE = 100;
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [sortConfig, setSortConfig] = useState<{ key: keyof Stock; direction: 'asc' | 'desc' } | null>(null);
   const [activeTab, setActiveTab] = useState<'stock' | 'index'>('stock');
-  const activeTabRef = useRef(activeTab);
-  const [isInitialized, setIsInitialized] = useState(false);
+  const activeTabRef = useRef(activeTab); // Ref to track current tab in async calls
 
   useEffect(() => {
     activeTabRef.current = activeTab;
+    loadStocks();
   }, [activeTab]);
 
-  useEffect(() => {
-    activeTabRef.current = activeTab;
-  }, [activeTab]);
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 50;
 
-  const [indexSymbol, setIndexSymbol] = useState('');
+  // Search
+  const [searchQuery, setSearchQuery] = useState('');
+  const [appliedQuery, setAppliedQuery] = useState('');
+
+  // Import Status
+  const [importStatus, setImportStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+
+  // Filter
+  const [filterMode, setFilterMode] = useState<'all' | 'holding' | 'past' | 'trending' | 'notes' | 'star' | 'doubleCircle' | 'circle'>('all');
+  const [selectedViewId, setSelectedViewId] = useState<string>("");
+
+  // Column Visibility
+  const [visibleColumns, setVisibleColumns] = useState<string[]>(DEFAULT_COLUMNS);
 
   // Advanced Filter
-  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
   const [activeCriteria, setActiveCriteria] = useState<FilterCriteria | null>(null);
-  const [filterRefreshKey, setFilterRefreshKey] = useState(0);
+  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
 
-  // Helper to update URL
-  const updateUrl = (updates: Record<string, string | null>) => {
-    const params = new URLSearchParams(searchParams.toString());
-    Object.entries(updates).forEach(([key, value]) => {
-      if (value === null || value === '') {
-        params.delete(key);
-      } else {
-        params.set(key, value);
+  // Column Filters
+  const [columnFilters, setColumnFilters] = useState<Record<string, ColumnFilterValue>>({});
+
+  // System status
+  const [systemStatusMsg, setSystemStatusMsg] = useState<string | null>(null);
+
+  // Index adding
+  const [indexSymbol, setIndexSymbol] = useState('');
+  const [msg, setMsg] = useState('');
+
+  // Settings loaded flag
+  const [areSettingsLoaded, setAreSettingsLoaded] = useState(false);
+
+  // Inline Note Editing State
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingNoteValue, setEditingNoteValue] = useState('');
+
+  // Chart Hover State
+  const [hoveredChartStock, setHoveredChartStock] = useState<Stock | null>(null);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+
+  // Initial Data Load
+  useEffect(() => {
+    // Restore from localStorage if URL is clean (empty params)
+    // Restore from localStorage if URL is clean (empty params)
+    const paramCount = Array.from(searchParams.keys()).length;
+
+    if (paramCount === 0) {
+      const stored = localStorage.getItem('dashboardParams');
+      if (stored) {
+        router.replace(`${pathname}?${stored}`);
+        return;
       }
-    });
-    const queryString = params.toString();
-    localStorage.setItem('dashboardParams', queryString); // Save to LocalStorage
-    router.replace(`${pathname}?${queryString}`);
-  };
-
-  // Restore from LocalStorage on mount if URL has no params
-  useEffect(() => {
-    if (Array.from(searchParams.keys()).length === 0) {
-      const savedParams = localStorage.getItem('dashboardParams');
-      if (savedParams) {
-        router.replace(`${pathname}?${savedParams}`);
-      }
-    }
-  }, []); // Run once on mount
-
-  const handleFilterChange = (mode: 'all' | 'holding' | 'past' | 'trending' | 'notes' | 'star' | 'doubleCircle' | 'circle') => {
-    const newMode = filterMode === mode ? 'all' : mode;
-    setFilterMode(newMode);
-    updateUrl({ filter: newMode === 'all' ? null : newMode });
-  };
-
-  const handleSearchChange = (val: string) => {
-    setSearchQuery(val);
-    // updateUrl({ q: val || null }); // Removed immediate update
-  };
-
-  // Handle Enter key for search
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      setAppliedQuery(searchQuery);
-      updateUrl({ q: searchQuery || null });
-    }
-  };
-
-
-  const handleClearSearch = () => {
-    setSearchQuery('');
-    setAppliedQuery('');
-    updateUrl({ q: null });
-  };
-
-  useEffect(() => {
-    if (isInitialized) {
-      loadStocks();
-    }
-  }, [activeTab, isInitialized]); // Reload when tab changes
-
-  // Sync state from URL params on change (Fix for back navigation)
-  useEffect(() => {
-    const q = searchParams.get('q') || '';
-    const f = (searchParams.get('filter') as 'all' | 'holding' | 'past' | 'trending' | 'notes' | 'star' | 'doubleCircle' | 'circle') || 'all';
-    const sKey = searchParams.get('sort') as keyof Stock | null;
-    const sDir = (searchParams.get('order') as 'asc' | 'desc') || 'asc';
-    const advParam = searchParams.get('adv');
-    const tabParam = searchParams.get('tab') as 'stock' | 'index' | null;
-
-    setSearchQuery(q);
-    setAppliedQuery(q);
-    setFilterMode(f);
-    if (sKey) {
-      setSortConfig({ key: sKey, direction: sDir });
-    }
-    if (tabParam && tabParam !== activeTab) {
-      setActiveTab(tabParam);
     }
 
-    if (advParam) {
+    // URL Params
+    const q = searchParams.get('q');
+    if (q) {
+      setSearchQuery(q);
+      setAppliedQuery(q);
+    }
+
+    const tab = searchParams.get('tab');
+    if ((tab === 'stock' || tab === 'index') && tab !== activeTab) {
+      setActiveTab(tab);
+    }
+
+    // Sort
+    const sortKey = searchParams.get('sort');
+    const sortOrder = searchParams.get('order');
+    if (sortKey) {
+      // Simple object comparison is hard, but usually fine to just set.
+      // Or check if changed. For now, setter is likely fine if effect doesn't run often.
+      setSortConfig({ key: sortKey as any, direction: (sortOrder as any) || 'asc' });
+    }
+
+    // Filter
+    const filter = searchParams.get('filter');
+    if (filter && filter !== filterMode) {
+      setFilterMode(filter as any);
+    }
+
+    // Advanced Filter
+    const adv = searchParams.get('adv');
+    if (adv) {
       try {
-        const criteria = JSON.parse(decodeURIComponent(advParam));
-        setActiveCriteria(criteria);
-      } catch (e) {
-        console.error("Failed to parse adv filter param", e);
-      }
-      // If user navigates back and URL doesn't have it, we should clear it to reflect URL state.
-      setActiveCriteria(null);
+        const parsed = JSON.parse(adv);
+        // Deep compare is expensive, JSON string compare is easy
+        if (JSON.stringify(activeCriteria) !== adv) {
+          setActiveCriteria(parsed);
+        }
+      } catch (e) { }
     }
 
-    setIsInitialized(true);
-  }, [searchParams]);
+    loadStocks();
+
+    // const interval = setInterval(loadStocks, 30000); // Poll every 30s
+    // return () => clearInterval(interval);
+  }, [searchParams.toString(), pathname, router]);
+
+  useEffect(() => {
+    // Columns
+    const savedCols = localStorage.getItem('dashboardVisibleColumns');
+    if (savedCols) {
+      try {
+        const parsed = JSON.parse(savedCols);
+        if (Array.isArray(parsed)) {
+          setVisibleColumns(parsed);
+        }
+      } catch (e) {
+        console.error("Failed to parse saved columns", e);
+      }
+    }
+
+    // View ID
+    const savedViewId = localStorage.getItem('dashboardViewId');
+    if (savedViewId) {
+      setSelectedViewId(savedViewId);
+    }
+
+    setAreSettingsLoaded(true);
+  }, []);
+
+  // Save settings on change
+  useEffect(() => {
+    if (areSettingsLoaded) {
+      localStorage.setItem('dashboardVisibleColumns', JSON.stringify(visibleColumns));
+    }
+  }, [visibleColumns, areSettingsLoaded]);
+
+  useEffect(() => {
+    if (areSettingsLoaded) {
+      if (selectedViewId) {
+        localStorage.setItem('dashboardViewId', selectedViewId);
+      } else {
+        localStorage.removeItem('dashboardViewId');
+      }
+    }
+  }, [selectedViewId, areSettingsLoaded]);
 
   async function loadStocks() {
     setLoading(true);
@@ -160,13 +228,6 @@ export default function Home() {
     }
   }
 
-  const handleTabChange = (tab: 'stock' | 'index') => {
-    setStocks([]); // Clear data to avoid showing stale table content
-    setActiveTab(tab);
-    setCurrentPage(1);
-    updateUrl({ tab });
-  };
-
   async function handleAddIndex() {
     if (!indexSymbol) return;
     try {
@@ -180,15 +241,64 @@ export default function Home() {
   }
 
   async function handleImport() {
-    if (!importPath) return;
+    const prev = localStorage.getItem('lastImportPath') || '';
+    const path = await pickFile(prev);
+
+    if (!path) return; // Cancelled
+
+    localStorage.setItem('lastImportPath', path);
+
     try {
-      await triggerImport([importPath]);
+      setImportStatus('loading');
+      await triggerImport([path]);
       await loadStocks(); // Refresh data
-      setMsg(t('importCompleted'));
+      setImportStatus('success');
+      setTimeout(() => setImportStatus('idle'), 3000);
     } catch (e) {
-      setMsg(t('importFailed'));
+      setImportStatus('error');
+      setTimeout(() => setImportStatus('idle'), 3000);
     }
   }
+
+  // Inline Note Handlers
+  const handleNoteDoubleClick = (stock: Stock) => {
+    setEditingNoteId(stock.symbol);
+    setEditingNoteValue(stock.note || '');
+  };
+
+  const handleNoteSave = async (symbol: string) => {
+    try {
+      await updateStock(symbol, { note: editingNoteValue });
+      // Optimistic update
+      setStocks(prev => prev.map(s => s.symbol === symbol ? { ...s, note: editingNoteValue } : s));
+      setEditingNoteId(null);
+    } catch (e) {
+      console.error("Failed to save note", e);
+      alert("Failed to save note");
+    }
+  };
+
+  const handleNoteKeyDown = (e: React.KeyboardEvent, symbol: string) => {
+    if (e.key === 'Enter') {
+      handleNoteSave(symbol);
+    } else if (e.key === 'Escape') {
+      setEditingNoteId(null);
+    }
+  };
+
+  // Chart Hover Handlers
+  const handleChartEnter = (stock: Stock) => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHoveredChartStock(stock);
+    }, 600); // 0.6s delay
+  };
+
+  const handleChartLeave = () => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    setHoveredChartStock(null);
+  };
+
 
   const setSort = (key: keyof Stock, direction: 'asc' | 'desc') => {
     setSortConfig({ key, direction });
@@ -201,6 +311,53 @@ export default function Home() {
       direction = 'desc';
     }
     setSort(key, direction);
+  };
+
+  // Helper to update URL
+  const updateUrl = (updates: Record<string, string | null>) => {
+    const params = new URLSearchParams(searchParams.toString());
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === '') {
+        params.delete(key);
+      } else {
+        params.set(key, value);
+      }
+    });
+    const queryString = params.toString();
+    localStorage.setItem('dashboardParams', queryString); // Save to LocalStorage
+    router.replace(`${pathname}?${queryString}`);
+  };
+
+  const handleTabChange = (tab: 'stock' | 'index') => {
+    setStocks([]); // Clear data to avoid showing stale table content
+    setActiveTab(tab);
+    setCurrentPage(1);
+    updateUrl({ tab });
+  };
+
+  const handleSearchChange = (val: string) => {
+    setSearchQuery(val);
+    // updateUrl({ q: val || null }); // Removed immediate update
+  };
+
+  // Handle Enter key for search
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      setAppliedQuery(searchQuery);
+      updateUrl({ q: searchQuery || null });
+    }
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    setAppliedQuery('');
+    updateUrl({ q: null });
+  };
+
+  const handleFilterChange = (mode: 'all' | 'holding' | 'past' | 'trending' | 'notes' | 'star' | 'doubleCircle' | 'circle') => {
+    const newMode = filterMode === mode ? 'all' : mode;
+    setFilterMode(newMode);
+    updateUrl({ filter: newMode === 'all' ? null : newMode });
   };
 
   // Advanced Filter Handlers
@@ -222,541 +379,661 @@ export default function Home() {
     updateUrl({ adv: null });
   };
 
-  // Filter Logic
-  const filteredStocks = useMemo(() => {
-    return stocks.filter((stock) => {
-      // 1. Symbol Filters (Quick check)
-      if (filterMode === 'star') {
-        const n = (stock.note || '') + (stock.latest_analysis || '');
-        return n.includes('★');
+  const handleColumnFilterChange = (key: string, value: ColumnFilterValue | null) => {
+    setColumnFilters(prev => {
+      const next = { ...prev };
+      if (value === null) {
+        delete next[key];
+      } else {
+        next[key] = value;
       }
-      if (filterMode === 'doubleCircle') {
-        const n = (stock.note || '') + (stock.latest_analysis || '');
-        return n.includes('◎');
-      }
-      if (filterMode === 'circle') {
-        const n = (stock.note || '') + (stock.latest_analysis || '');
-        return n.includes('〇');
-      }
-
-      // Initialize status flags
-      let passesAdvancedFilter = true;
-      let passesQuickFilter = true;
-
-      // 2. Advanced Filter
-      if (activeCriteria) {
-        if (activeCriteria.is_in_uptrend && !stock.is_in_uptrend) passesAdvancedFilter = false;
-        // Note: stock.note can be empty string, which is falsy. This is correct for "Has Note" check.
-        if (activeCriteria.has_note && !stock.note) passesAdvancedFilter = false;
-        if (activeCriteria.has_analysis && !stock.latest_analysis) passesAdvancedFilter = false;
-        if (activeCriteria.min_composite_rating && (stock.composite_rating || 0) < activeCriteria.min_composite_rating) passesAdvancedFilter = false;
-        if (activeCriteria.min_rs_rating && (stock.rs_rating || 0) < activeCriteria.min_rs_rating) passesAdvancedFilter = false;
-
-        // Signal Checks
-        const signals: (keyof FilterCriteria)[] = [
-          'signal_higher_200ma', 'signal_near_200ma', 'signal_over_50ma', 'signal_higher_50ma_than_200ma',
-          'signal_sameslope_50_200', 'signal_uptrand_200ma', 'signal_high_volume',
-          'signal_newhigh', 'signal_newhigh_200days', 'signal_newhigh_100days', 'signal_newhigh_50days',
-          'signal_price_up', 'signal_break_atr', 'signal_high_slope5ma'
-        ];
-        for (const sig of signals) {
-          if (activeCriteria[sig] && !stock[sig as keyof Stock]) passesAdvancedFilter = false;
-        }
-
-        if (passesAdvancedFilter && activeCriteria.status && activeCriteria.status !== 'Any') {
-          if (activeCriteria.status === 'None' && (stock.status === 'Holding' || stock.status === 'Past Trade')) passesAdvancedFilter = false;
-          if (activeCriteria.status !== 'None' && stock.status !== activeCriteria.status) passesAdvancedFilter = false;
-        }
-      }
-
-      if (!passesAdvancedFilter) return false;
-
-      // 3. Quick Filters (AND logic with Advanced)
-      // If 'all', we pass unless advanced filter failed.
-      if (filterMode === 'holding') passesQuickFilter = stock.status === 'Holding';
-      else if (filterMode === 'past') passesQuickFilter = stock.status === 'Past Trade';
-      else if (filterMode === 'trending') passesQuickFilter = !!stock.is_in_uptrend;
-      else if (filterMode === 'notes') passesQuickFilter = !!stock.note;
-
-      return passesQuickFilter;
-    }).filter((stock) => {
-      // Free text search
-      if (!appliedQuery) return true;
-      const q = appliedQuery.toLowerCase();
-      // Use local variables to avoid repeating lowercasing
-      const symbol = (stock.symbol || '').toLowerCase();
-      const company = (stock.company_name || '').toLowerCase();
-      const sector = (stock.sector || '').toLowerCase();
-      const industry = (stock.industry || '').toLowerCase();
-      const note = (stock.note || '').toLowerCase();
-      const analysis = (stock.latest_analysis || '').toLowerCase();
-
-      return (
-        symbol.includes(q) ||
-        company.includes(q) ||
-        sector.includes(q) ||
-        industry.includes(q) ||
-        note.includes(q) ||
-        analysis.includes(q)
-      );
+      return next;
     });
-  }, [stocks, appliedQuery, filterMode, activeCriteria]);
+  };
 
-  const sortedStocks = [...filteredStocks].sort((a, b) => {
-    if (!sortConfig) return 0;
-    const { key, direction } = sortConfig;
-    const aVal = a[key];
-    const bVal = b[key];
+  // Filtering Logic
+  const filteredStocks = useMemo(() => {
+    return stocks.filter(stock => {
+      // 1. Text Search (Symbol, Company, Sector)
+      if (appliedQuery) {
+        const q = appliedQuery.toLowerCase();
+        const match = stock.symbol.toLowerCase().includes(q) ||
+          stock.company_name.toLowerCase().includes(q) ||
+          stock.sector?.toLowerCase().includes(q);
+        if (!match) return false;
+      }
 
-    if (aVal === bVal) return 0;
-    // Handle nulls
-    if (aVal === null || aVal === undefined) return 1;
-    if (bVal === null || bVal === undefined) return -1;
+      // 2. Tab Filter (Managed by API but good to double check or if mixed)
+      // API handles asset_type, so we can assume stocks here are correct type unless mixed list.
 
-    if (aVal < bVal) return direction === 'asc' ? -1 : 1;
-    if (aVal > bVal) return direction === 'asc' ? 1 : -1;
-    return 0;
-  });
+      // 3. Quick Filters
+      if (filterMode === 'holding') {
+        if (stock.status !== 'Holding') return false;
+      } else if (filterMode === 'past') {
+        if (stock.status !== 'Past Trade') return false;
+      } else if (filterMode === 'trending') {
+        if (!stock.is_in_uptrend) return false;
+      } else if (filterMode === 'notes') {
+        if (!stock.note) return false;
+      } else if (filterMode === 'star') {
+        if (!stock.latest_analysis?.includes('★')) return false;
+      } else if (filterMode === 'doubleCircle') {
+        if (!stock.latest_analysis?.includes('◎')) return false;
+      } else if (filterMode === 'circle') {
+        if (!stock.latest_analysis?.includes('○')) return false;
+      }
+
+      // 4. Advanced Filters
+      if (activeCriteria) {
+        if (activeCriteria.status && activeCriteria.status !== 'None' && stock.status !== activeCriteria.status) return false;
+        if (activeCriteria.industry && activeCriteria.industry !== 'Any' && stock.industry !== activeCriteria.industry) return false;
+
+        if (activeCriteria.min_composite_rating && (stock.composite_rating || 0) < activeCriteria.min_composite_rating) return false;
+        if (activeCriteria.min_rs_rating && (stock.rs_rating || 0) < activeCriteria.min_rs_rating) return false;
+        if (activeCriteria.min_atr && (stock.atr_14 || 0) < activeCriteria.min_atr) return false;
+
+        if (activeCriteria.is_in_uptrend && !stock.is_in_uptrend) return false;
+        if (activeCriteria.has_note && !stock.note) return false;
+        if (activeCriteria.has_analysis && !stock.latest_analysis) return false;
+
+        // Dynamic Signal Checks
+        // Iterate over keys starting with 'signal_' in activeCriteria
+        for (const key in activeCriteria) {
+          if (key.startsWith('signal_') && (activeCriteria as any)[key] === true) {
+            // Check if stock has this signal = 1
+            if ((stock as any)[key] !== 1) return false;
+          }
+        }
+      }
+
+      // 5. Column Filters
+      for (const [key, filterVal] of Object.entries(columnFilters)) {
+        if (!filterVal) continue;
+
+        const val = (stock as any)[key];
+
+        // Range Filter
+        if ('min' in filterVal || 'max' in filterVal) {
+          const numVal = Number(val);
+          if (isNaN(numVal)) continue; // skip check if value is not number
+          if (filterVal.min !== undefined && numVal < filterVal.min) return false;
+          if (filterVal.max !== undefined && numVal > filterVal.max) return false;
+        }
+
+        // Select Filter
+        if ('selected' in filterVal) {
+          if (filterVal.selected && filterVal.selected.length > 0 && !filterVal.selected.includes(String(val))) return false;
+        }
+      }
+
+      return true;
+    });
+  }, [stocks, appliedQuery, filterMode, activeCriteria, columnFilters]);
+
+  // Sorting Logic
+  const sortedStocks = useMemo(() => {
+    if (!sortConfig) return filteredStocks;
+    return [...filteredStocks].sort((a, b) => {
+      // Handle nulls/undefined always at end
+      const aVal = (a as any)[sortConfig.key];
+      const bVal = (b as any)[sortConfig.key];
+
+      if (aVal === bVal) return 0;
+      if (aVal === null || aVal === undefined) return 1;
+      if (bVal === null || bVal === undefined) return -1;
+
+      if (aVal < bVal) {
+        return sortConfig.direction === 'asc' ? -1 : 1;
+      }
+      if (aVal > bVal) {
+        return sortConfig.direction === 'asc' ? 1 : -1;
+      }
+      return 0;
+    });
+  }, [filteredStocks, sortConfig]);
 
   // Pagination Logic
   const totalPages = Math.ceil(sortedStocks.length / ITEMS_PER_PAGE);
-  const paginatedStocks = sortedStocks.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+  const currentStocks = sortedStocks.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
+
+  // Reset page when filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [totalPages]);
+
+  const [toastMsg, setToastMsg] = useState('');
+
+  const handleAddResearch = (symbol: string) => {
+    addResearchTicker(symbol);
+    setToastMsg(t('addedToResearch').replace('{{symbol}}', symbol));
+  };
 
   const SortIcon = ({ colKey }: { colKey: keyof Stock }) => {
     if (sortConfig?.key !== colKey) return <span className="text-gray-600 ml-1">⇅</span>;
     return <span className="text-blue-400 ml-1">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>;
   };
 
-  return (
-    <main className="min-h-screen bg-gray-900 text-gray-100 pb-20">
-      <SystemStatusBanner />
+  const handleGlobalKeyDown = (e: React.KeyboardEvent) => {
+    // Ignore if input/textarea is focused
+    const target = e.target as HTMLElement;
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable) {
+      return;
+    }
 
-      <div className="p-8">
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">
-            {t('dashboardTitle')}
-          </h1>
-          <div className="flex gap-4">
-            <Link href="/deep-research" className="px-4 py-2 bg-blue-900/40 hover:bg-blue-800/60 rounded border border-blue-700/50 transition flex items-center gap-2 text-blue-200">
-              <span>🧠</span> Deep Research
-            </Link>
-            <Link href="/prompts" className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded border border-gray-600 transition flex items-center gap-2">
-              <span>🤖</span> Gemini Prompts
-            </Link>
-          </div>
-        </div>
+    if (e.key === 'ArrowLeft') {
+      setCurrentPage(p => Math.max(1, p - 1));
+    } else if (e.key === 'ArrowRight') {
+      setCurrentPage(p => Math.min(totalPages, p + 1));
+    }
+  };
 
-        {/* Tabs */}
-        <div className="flex gap-4 mb-6 border-b border-gray-700 pb-2">
-          <button
-            onClick={() => handleTabChange('stock')}
-            className={`px-4 py-2 font-bold transition border-b-2 ${activeTab === 'stock' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
-          >
-            Stocks
-          </button>
-          <button
-            onClick={() => handleTabChange('index')}
-            className={`px-4 py-2 font-bold transition border-b-2 ${activeTab === 'index' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-300'}`}
-          >
-            Indices / ETFs
-          </button>
-        </div>
-
-        <div className="mb-8 p-6 bg-gray-800 rounded-xl border border-gray-700">
-          <div className="flex gap-4 items-center">
-            {activeTab === 'stock' ? (
-              <>
-                <h2 className="text-xl font-bold">{t('runImport')}</h2>
-                <input
-                  type="text"
-                  className="p-2 rounded bg-gray-700 border border-gray-600 w-full md:w-96 text-white"
-                  placeholder={t('importPlaceholder')}
-                  value={importPath}
-                  onChange={(e) => setImportPath(e.target.value)}
-                />
-                <button onClick={handleImport} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded font-bold transition">
-                  {t('runImport')}
-                </button>
-              </>
-            ) : (
-              <>
-                <h2 className="text-xl font-bold">Add Index / ETF</h2>
-                <input
-                  type="text"
-                  className="p-2 rounded bg-gray-700 border border-gray-600 w-full md:w-96 text-white"
-                  placeholder="Enter Yahoo Finance Symbol (e.g., ^GSPC, SPY)"
-                  value={indexSymbol}
-                  onChange={(e) => setIndexSymbol(e.target.value)}
-                />
-                <button onClick={handleAddIndex} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded font-bold transition">
-                  Add Symbol
-                </button>
-              </>
-            )}
-
-            <button
-              onClick={loadStocks}
-              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded transition flex items-center gap-2"
-              title={t('refreshAnalysis')}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              <span className="hidden md:inline">{t('refreshAnalysis')}</span>
-            </button>
-            <span className={msg.includes('Failed') ? 'text-red-400' : 'text-green-400'}>{msg}</span>
-          </div>
-        </div>
-
-        <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-xl mb-8">
-          <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-            <div className="flex gap-2 flex-wrap">
-              <button
-                onClick={() => handleFilterChange('all')}
-                className={`px-4 py-2 rounded-full text-sm font-bold transition border ${filterMode === 'all' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
+  const renderCell = (stock: Stock, key: string) => {
+    switch (key) {
+      case 'symbol':
+        return (
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-blue-400">{stock.symbol}</span>
+            <div className="flex gap-1">
+              <a
+                href={`https://research.investors.com/ibdchartsenlarged.aspx?symbol=${stock.symbol}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="opacity-50 hover:opacity-100 transition"
+                onClick={(e) => e.stopPropagation()}
+                title="IBD Chart"
               >
-                {t('filterAll')}
-              </button>
-              <button
-                onClick={() => handleFilterChange('holding')}
-                className={`px-4 py-2 rounded-full text-sm font-bold transition border ${filterMode === 'holding' ? 'bg-green-700 border-green-600 text-white' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
+                <span className="text-[10px] bg-yellow-600 text-white px-1 py-0.5 rounded font-bold">I</span>
+              </a>
+              <a
+                href={`https://www.tradingview.com/chart/?symbol=${stock.symbol}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="opacity-50 hover:opacity-100 transition"
+                onClick={(e) => e.stopPropagation()}
+                title="TradingView"
               >
-                {t('filterHolding')}
-              </button>
+                <span className="text-[10px] bg-blue-600 text-white px-1 py-0.5 rounded font-bold">T</span>
+              </a>
+              {/* Add to Research Icon (Restored) */}
               <button
-                onClick={() => handleFilterChange('past')}
-                className={`px-4 py-2 rounded-full text-sm font-bold transition border ${filterMode === 'past' ? 'bg-purple-900 border-purple-700 text-purple-200' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleAddResearch(stock.symbol);
+                }}
+                className="opacity-50 hover:opacity-100 transition"
+                title={t('addToDeepResearch')}
               >
-                {t('filterPast')}
-              </button>
-              <button
-                onClick={() => handleFilterChange('trending')}
-                className={`px-4 py-2 rounded-full text-sm font-bold transition border ${filterMode === 'trending' ? 'bg-red-900 border-red-700 text-red-200' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
-              >
-                {t('filterTrending')}
-              </button>
-              <button
-                onClick={() => handleFilterChange('notes')}
-                className={`px-4 py-2 rounded-full text-sm font-bold transition border ${filterMode === 'notes' ? 'bg-indigo-900 border-indigo-700 text-indigo-200' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
-              >
-                {t('filterNotes')}
-              </button>
-              <button
-                onClick={() => handleFilterChange('star')}
-                className={`px-4 py-2 rounded-full text-sm font-bold transition border ${filterMode === 'star' ? 'bg-yellow-900 border-yellow-700 text-yellow-200' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
-              >
-                ★
-              </button>
-              <button
-                onClick={() => handleFilterChange('doubleCircle')}
-                className={`px-4 py-2 rounded-full text-sm font-bold transition border ${filterMode === 'doubleCircle' ? 'bg-pink-900 border-pink-700 text-pink-200' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
-              >
-                ◎
-              </button>
-              <button
-                onClick={() => handleFilterChange('circle')}
-                className={`px-4 py-2 rounded-full text-sm font-bold transition border ${filterMode === 'circle' ? 'bg-cyan-900 border-cyan-700 text-cyan-200' : 'bg-gray-900 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
-              >
-                〇
+                <span className="text-lg leading-none">🧠</span>
               </button>
             </div>
+          </div>
+        );
 
-            {/* Search & Advanced Filter */}
-            <div className="flex flex-wrap items-center gap-4 mt-4 w-full md:w-auto md:ml-auto md:mt-0 justify-end">
-              <FilterSelect onSelect={handleApplyAdvancedFilter} refreshKey={filterRefreshKey} />
+      case 'sector':
+      case 'industry':
+        return (
+          <span className="px-2 py-0.5 bg-gray-800 rounded text-xs text-gray-400 border border-gray-700 whitespace-nowrap block truncate max-w-[120px]" title={String(stock[key as keyof Stock])}>
+            {String(stock[key as keyof Stock])}
+          </span>
+        );
 
-              <button
-                onClick={() => setIsFilterDialogOpen(true)}
-                className={`px-3 py-1 rounded text-sm font-bold transition flex items-center gap-1 ${activeCriteria ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
-              >
-                {activeCriteria ? 'Filter Active' : 'Advanced Filter'}
-              </button>
+      case 'company_name':
+        return <div className="truncate max-w-[150px]" title={stock.company_name}>{stock.company_name}</div>;
 
-              {activeCriteria && (
-                <button
-                  onClick={handleClearAdvancedFilter}
-                  className="px-3 py-1 rounded text-sm font-bold bg-gray-700 text-gray-300 hover:bg-red-900 hover:text-red-200 border border-gray-600 transition flex items-center justify-center ml-2"
-                  title="Clear Advanced Filter"
-                >
-                  ✕
-                </button>
-              )}
+      case 'note':
+        if (editingNoteId === stock.symbol) {
+          return (
+            <input
+              type="text"
+              value={editingNoteValue}
+              onChange={(e) => setEditingNoteValue(e.target.value)}
+              onBlur={() => handleNoteSave(stock.symbol)}
+              onKeyDown={(e) => handleNoteKeyDown(e, stock.symbol)}
+              autoFocus
+              className="bg-gray-700 text-white p-1 rounded w-full border border-blue-500 outline-none"
+              onClick={(e) => e.stopPropagation()}
+            />
+          );
+        }
+        return (
+          <div
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              handleNoteDoubleClick(stock);
+            }}
+            className="cursor-text min-h-[20px] hover:bg-gray-800/50 rounded px-1 transition truncate max-w-[200px]"
+            title={stock.note}
+          >
+            {stock.note || null}
+          </div>
+        );
 
-              <div className="relative w-full">
+      case 'status':
+        let color = 'bg-gray-700 text-gray-300';
+        let label = '';
+        if (stock.status === 'Holding') {
+          color = 'bg-green-900 text-green-300 border border-green-700';
+          label = '保有中';
+        } else if (stock.status === 'Past Trade') {
+          color = 'bg-blue-900 text-blue-300 border border-blue-700';
+          label = '過去の取引';
+        } else {
+          return null; // None -> Empty
+        }
+        return <span className={`text-xs px-2 py-0.5 rounded border ${color}`}>{label}</span>;
+
+      case 'latest_analysis':
+        if (!stock.latest_analysis) return null;
+        return (
+          <div
+            className="truncate max-w-[150px] text-xs text-gray-200 font-medium"
+            title={stock.latest_analysis}
+          >
+            {stock.latest_analysis}
+          </div>
+        );
+
+      case 'composite_rating':
+        const crVal = stock[key as keyof Stock];
+        const cr = Number(crVal);
+        let crClass = 'text-gray-500 font-mono';
+        if (cr >= 95) crClass = 'text-yellow-400 font-bold font-mono'; // Elite
+        else if (cr >= 90) crClass = 'text-yellow-500 font-bold font-mono';
+        else if (cr >= 80) crClass = 'text-green-400 font-mono';
+        else if (cr >= 70) crClass = 'text-yellow-600 font-mono';
+        return <span className={crClass}>{crVal || '-'}</span>;
+
+      case 'rs_rating':
+        const rsVal = stock[key as keyof Stock];
+        const rs = Number(rsVal);
+        let rsClass = 'text-gray-500 font-mono';
+        if (rs >= 95) rsClass = 'text-blue-300 font-bold font-mono'; // Elite
+        else if (rs >= 90) rsClass = 'text-blue-400 font-bold font-mono';
+        else if (rs >= 80) rsClass = 'text-green-400 font-mono';
+        else if (rs >= 70) rsClass = 'text-yellow-600 font-mono';
+        return <span className={rsClass}>{rsVal || '-'}</span>;
+
+      case 'change_percentage_1d':
+      case 'change_percentage_5d':
+      case 'change_percentage_20d':
+      case 'change_percentage_50d':
+      case 'change_percentage_200d':
+      case 'deviation_5ma_pct':
+      case 'deviation_20ma_pct':
+      case 'deviation_50ma_pct':
+      case 'deviation_200ma_pct':
+        const p = stock[key as keyof Stock] as number;
+        if (p === undefined || p === null) return <div className="text-right text-gray-700 font-mono">-</div>;
+        return (
+          <div className={`text-right font-mono ${p > 0 ? 'text-red-400' : p < 0 ? 'text-blue-400' : 'text-gray-500'}`}>
+            {p > 0 ? '+' : ''}{p.toFixed(2)}%
+          </div>
+        );
+
+      case 'realized_pl':
+        const pl = stock.realized_pl as number;
+        if (pl === undefined || pl === null || pl === 0) return null;
+        return (
+          <div className={`text-right font-mono ${pl > 0 ? 'text-red-400' : pl < 0 ? 'text-blue-400' : 'text-gray-500'}`}>
+            {pl.toFixed(2)}
+          </div>
+        );
+
+      case 'first_import_date':
+      case 'updated_at':
+      case 'last_buy_date':
+      case 'last_sell_date':
+        const d = stock[key as keyof Stock];
+        return d ? new Date(String(d)).toLocaleDateString() : null;
+
+      case 'daily_chart_data':
+        return (
+          <div
+            onMouseEnter={() => handleChartEnter(stock)}
+            onMouseLeave={handleChartLeave}
+            className="relative"
+          >
+            <MiniCandleChart dataJson={stock.daily_chart_data as string} />
+          </div>
+        );
+
+      case 'daily_chart_data_large':
+        return <MiniCandleChart dataJson={stock.daily_chart_data as string} width={384} height={144} />;
+
+      case 'market_cap':
+        const mc = Number(stock.market_cap);
+        if (!mc) return '-';
+        if (mc >= 1e9) return <span className="font-mono text-xs">{(mc / 1e9).toFixed(2)}B</span>;
+        if (mc >= 1e6) return <span className="font-mono text-xs">{(mc / 1e6).toFixed(2)}M</span>;
+        return <span className="font-mono text-xs">{mc.toLocaleString()}</span>;
+
+      default:
+        const v = stock[key as keyof Stock];
+        return v !== undefined && v !== null ? String(v) : '-';
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-black text-gray-200 font-sans cursor-default" onKeyDown={handleGlobalKeyDown} tabIndex={-1}>
+      {/* Header */}
+      <header className="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-900/50 sticky top-0 z-10 backdrop-blur">
+        <div className="flex items-center gap-4">
+          <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+            {t('dashboardTitle')}
+          </h1>
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleTabChange('stock')}
+              className={`px-3 py-1 rounded text-sm font-bold transition ${activeTab === 'stock' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-white'}`}
+            >
+              STOCKS
+            </button>
+            <button
+              onClick={() => handleTabChange('index')}
+              className={`px-3 py-1 rounded text-sm font-bold transition ${activeTab === 'index' ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-white'}`}
+            >
+              INDICES
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          {/* Deep Research Link (Restored) */}
+          <div className="flex items-center gap-2">
+            {/* Index Adder (Only for Index tab) */}
+            {activeTab === 'index' && (
+              <div className="flex items-center gap-1 mr-2">
                 <input
                   type="text"
-                  placeholder={t('searchPlaceholder') || "Search Ticker, Company, Sector..."}
-                  className="w-full bg-gray-900 border border-gray-600 rounded-lg py-2 px-4 pl-10 focus:outline-none focus:border-blue-500 transition"
+                  value={indexSymbol}
+                  onChange={e => setIndexSymbol(e.target.value.toUpperCase())}
+                  placeholder="Index Sym"
+                  className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white uppercase w-20"
+                />
+                <button
+                  onClick={handleAddIndex}
+                  className="bg-green-700 hover:bg-green-600 text-white rounded px-2 py-1 text-xs"
+                >
+                  +
+                </button>
+              </div>
+            )}
+            {msg && <span className="text-xs text-green-400 animate-pulse mr-2">{msg}</span>}
+
+            <Link
+              href="/deep-research"
+              className="flex items-center gap-2 bg-purple-700 hover:bg-purple-600 text-white px-3 py-1.5 rounded shadow shadow-purple-900/50 transition font-bold text-sm"
+            >
+              <span>🧠</span>
+              <span>{t('deepResearchTitle') || 'Deep Research'}</span>
+            </Link>
+          </div>
+
+          {/* AI Analysis Folder Button (Restored) */}
+          <button
+            onClick={() => openAnalysisFolder().catch(e => alert(e))}
+            className="flex items-center gap-2 bg-blue-700 hover:bg-blue-600 text-white px-3 py-1.5 rounded shadow shadow-blue-900/50 transition font-bold text-sm"
+            title="Open Analysis Folder"
+          >
+            <span>📂</span>
+            <span>AI分析</span>
+          </button>
+
+          {/* Import Button (Moved here) */}
+          <button
+            onClick={handleImport}
+            disabled={importStatus === 'loading'}
+            className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-sm font-bold shadow shadow-blue-900/50 transition-all disabled:opacity-50 flex items-center gap-2"
+          >
+            {importStatus === 'loading' ? (
+              <span className="animate-spin">↻</span>
+            ) : (
+              <span>📥</span>
+            )}
+            {importStatus === 'loading' ? t('importing') : t('runImport')}
+          </button>
+          {importStatus === 'success' && <span className="text-green-500 text-sm">✓</span>}
+          {importStatus === 'error' && <span className="text-red-500 text-sm">✕</span>}
+
+          {/* System Status */}
+          <SystemStatusBanner />
+
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="p-4">
+        {/* Controls Bar */}
+        <div className="flex flex-wrap gap-4 items-end mb-6 bg-gray-900 p-4 rounded-lg border border-gray-800">
+          {/* Search */}
+          <div className="flex-1 min-w-[300px] flex gap-2">
+            {/* Ticker Navigation (New) */}
+            <div>
+              <label className="text-xs uppercase font-bold text-gray-500 mb-1 block tracking-wider">Ticker</label>
+              <input
+                type="text"
+                placeholder="W"
+                className="w-16 bg-black border border-gray-700 rounded px-2 py-2 text-white text-center font-bold font-mono focus:border-blue-500 outline-none uppercase"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const val = e.currentTarget.value.trim().toUpperCase();
+                    if (val) router.push(`/stocks/${val}`);
+                  }
+                }}
+              />
+            </div>
+
+            <div className="flex-1">
+              <label className="text-xs uppercase font-bold text-gray-500 mb-1 block tracking-wider">Search</label>
+              <div className="relative">
+                <input
+                  type="text"
                   value={searchQuery}
                   onChange={(e) => handleSearchChange(e.target.value)}
                   onKeyDown={handleKeyDown}
+                  placeholder={t('searchPlaceholder').toString()}
+                  className="w-full bg-black border border-gray-700 rounded px-4 py-2 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition"
                 />
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 absolute left-3 top-2.5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
                 {searchQuery && (
                   <button
                     onClick={handleClearSearch}
-                    className="absolute right-3 top-2.5 text-gray-500 hover:text-white transition"
-                    title="Clear Search"
+                    className="absolute right-3 top-2.5 text-gray-500 hover:text-white"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                    </svg>
+                    ✕
                   </button>
                 )}
-              </div>
-              <div className="text-gray-400 text-sm">
-                {t('showingStocks').replace('{{count}}', filteredStocks.length.toString()).replace('{{total}}', stocks.length.toString())}
               </div>
             </div>
           </div>
 
-          {loading ? (
-            <div className="text-center py-20 text-gray-500 animate-pulse">{t('loading')}</div>
-          ) : filteredStocks.length === 0 ? (
-            <div className="text-center py-20 text-gray-500">{activeTab === 'stock' ? t('noStocksFound') : "No Indices / ETFs found"}</div>
-          ) : (
-            <div className="overflow-x-auto rounded-xl">
-              {/* Pagination Controls (Top) */}
-              {filteredStocks.length > ITEMS_PER_PAGE && (
-                <div className="flex justify-end items-center gap-4 mb-4">
-                  <button
-                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                    disabled={currentPage === 1}
-                    className="px-3 py-1 bg-gray-800 rounded disabled:opacity-50 hover:bg-gray-700 transition text-sm text-gray-300"
-                  >
-                    &larr; {t('prev') || 'Prev'}
-                  </button>
-                  <span className="text-gray-400 text-sm">
-                    {currentPage} / {totalPages}
-                  </span>
-                  <button
-                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                    disabled={currentPage === totalPages}
-                    className="px-3 py-1 bg-gray-800 rounded disabled:opacity-50 hover:bg-gray-700 transition text-sm text-gray-300"
-                  >
-                    {t('next') || 'Next'} &rarr;
-                  </button>
-                </div>
-              )}
-
-              <table className="w-full text-sm text-left text-gray-400">
-                <thead className="text-xs text-gray-300 uppercase bg-gray-700 sticky top-0 z-10">
-                  <tr>
-                    <th scope="col" className="px-6 py-3 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('symbol')}>
-                      {t('ticker')} <SortIcon colKey="symbol" />
-                    </th>
-                    <th scope="col" className="px-6 py-3 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('company_name')}>
-                      {t('company')} <SortIcon colKey="company_name" />
-                    </th>
-                    {activeTab === 'stock' && (
-                      <>
-                        <th scope="col" className="px-6 py-3 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('sector')}>
-                          {t('sector')} <SortIcon colKey="sector" />
-                        </th>
-                        <th scope="col" className="px-6 py-3 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('industry')}>
-                          {t('industry')} <SortIcon colKey="industry" />
-                        </th>
-                        <th scope="col" className="px-4 py-3 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('composite_rating')}>
-                          CR <SortIcon colKey="composite_rating" />
-                        </th>
-                        <th scope="col" className="px-4 py-3 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('rs_rating')}>
-                          RS <SortIcon colKey="rs_rating" />
-                        </th>
-                        <th scope="col" className="px-6 py-3 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('note')}>
-                          {t('myNotes')} <SortIcon colKey="note" />
-                        </th>
-                        <th scope="col" className="px-6 py-3 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('status')}>
-                          {t('status')} <SortIcon colKey="status" />
-                        </th>
-                      </>
-                    )}
-
-
-                    <th scope="col" className="px-4 py-3 cursor-pointer text-right hover:bg-gray-600" onClick={() => handleSort('change_percentage_1d')}>
-                      1D <SortIcon colKey="change_percentage_1d" />
-                    </th>
-                    <th scope="col" className="px-4 py-3 cursor-pointer text-right hover:bg-gray-600" onClick={() => handleSort('change_percentage_5d')}>
-                      {t('change5d')} <SortIcon colKey="change_percentage_5d" />
-                    </th>
-                    <th scope="col" className="px-4 py-3 cursor-pointer text-right hover:bg-gray-600" onClick={() => handleSort('change_percentage_20d')}>
-                      {t('change20d')} <SortIcon colKey="change_percentage_20d" />
-                    </th>
-                    <th scope="col" className="px-4 py-3 cursor-pointer text-right hover:bg-gray-600" onClick={() => handleSort('change_percentage_50d')}>
-                      {t('change50d')} <SortIcon colKey="change_percentage_50d" />
-                    </th>
-                    <th scope="col" className="px-4 py-3 cursor-pointer text-right hover:bg-gray-600" onClick={() => handleSort('change_percentage_200d')}>
-                      {t('change200d')} <SortIcon colKey="change_percentage_200d" />
-                    </th>
-
-                    {activeTab === 'stock' && (
-                      <>
-                        <th scope="col" className="px-6 py-3 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('last_buy_date')}>
-                          {t('lastBuy')} <SortIcon colKey="last_buy_date" />
-                        </th>
-                        <th scope="col" className="px-6 py-3 cursor-pointer hover:bg-gray-600" onClick={() => handleSort('last_sell_date')}>
-                          {t('lastSell')} <SortIcon colKey="last_sell_date" />
-                        </th>
-                        <th scope="col" className="px-6 py-3 cursor-pointer hover:bg-gray-600 text-right" onClick={() => handleSort('realized_pl')}>
-                          {t('totalPL')} <SortIcon colKey="realized_pl" />
-                        </th>
-                        <th scope="col" className="px-4 py-3 cursor-pointer text-right hover:bg-gray-600" onClick={() => handleSort('first_import_date')}>
-                          Imported <SortIcon colKey="first_import_date" />
-                        </th>
-                      </>
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedStocks.map((stock) => (
-                    <tr
-                      key={stock.symbol}
-                      className="border-b border-gray-700 hover:bg-gray-750 cursor-pointer"
-                      onDoubleClick={() => router.push(`/stocks/${stock.symbol}`)}
-                    >
-                      <td className="px-6 py-4 font-bold text-white flex items-center gap-2">
-                        <Link href={`/stocks/${stock.symbol}`} className="hover:text-blue-400">
-                          {stock.symbol}
-                        </Link>
-                        <div className="flex gap-1">
-                          <a href={`https://research.investors.com/ibdchartsenlarged.aspx?symbol=${stock.symbol}`} target="_blank" rel="noopener noreferrer" className="opacity-50 hover:opacity-100" title="IBD Chart">
-                            <span className="text-xs bg-yellow-600 text-white px-1.5 py-0.5 rounded font-bold">I</span>
-                          </a>
-                          <a href={`https://www.tradingview.com/chart/?symbol=${stock.symbol}`} target="_blank" rel="noopener noreferrer" className="opacity-50 hover:opacity-100" title="TradingView">
-                            <span className="text-xs bg-blue-600 text-white px-1.5 py-0.5 rounded font-bold">T</span>
-                          </a>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">{stock.company_name}</td>
-                      {activeTab === 'stock' && (
-                        <>
-                          <td className="px-6 py-4">
-                            <span className="px-2 py-1 bg-gray-700 rounded text-xs text-gray-300 border border-gray-600">
-                              {stock.sector}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400 border border-gray-700">
-                              {stock.industry}
-                            </span>
-                          </td>
-                          <td className="px-4 py-4 text-center font-bold text-yellow-500">
-                            {stock.composite_rating || '-'}
-                          </td>
-                          <td className="px-4 py-4 text-center font-bold text-blue-400">
-                            {stock.rs_rating || '-'}
-                          </td>
-                          <td className="px-6 py-4">
-                            {stock.note && (
-                              <div className="flex items-center gap-1 text-xs text-yellow-300 mb-1" title={stock.note}>
-                                <span>📝</span>
-                                <span className="truncate max-w-[150px]">{stock.note}</span>
-                              </div>
-                            )}
-                            {stock.latest_analysis && (
-                              <div className="flex items-center gap-1 text-xs text-purple-400 italic" title={stock.latest_analysis}>
-                                <span>🤖</span>
-                                <span className="truncate max-w-[150px]">{stock.latest_analysis}</span>
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-6 py-4">
-                            {stock.status === 'Holding' && (
-                              <span className="px-2 py-1 bg-green-900 text-green-300 rounded text-xs font-bold border border-green-700">
-                                {t('holding')}
-                              </span>
-                            )}
-                            {stock.status === 'Past Trade' && (
-                              <span className="px-2 py-1 bg-gray-700 text-gray-400 rounded text-xs border border-gray-600">
-                                {t('pastTrade')}
-                              </span>
-                            )}
-                          </td>
-                        </>
-                      )}
-
-                      <td className={`px-4 py-4 text-right font-mono ${(stock.change_percentage_1d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_1d || 0) < 0 ? 'text-blue-400' : 'text-gray-400'
-                        }`}>
-                        {stock.change_percentage_1d !== undefined && stock.change_percentage_1d !== null ? `${stock.change_percentage_1d > 0 ? '+' : ''}${stock.change_percentage_1d.toFixed(1)}%` : '-'}
-                      </td>
-
-                      <td className={`px-4 py-4 text-right font-mono ${(stock.change_percentage_5d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_5d || 0) < 0 ? 'text-blue-400' : 'text-gray-400'
-                        }`}>
-                        {stock.change_percentage_5d ? `${stock.change_percentage_5d > 0 ? '+' : ''}${stock.change_percentage_5d.toFixed(1)}%` : '-'}
-                      </td>
-                      {/* 20D */}
-                      <td className={`px-4 py-4 text-right font-mono text-xs ${(stock.change_percentage_20d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_20d || 0) < 0 ? 'text-blue-400' : 'text-gray-500'
-                        }`}>
-                        {stock.change_percentage_20d ? `${stock.change_percentage_20d > 0 ? '+' : ''}${stock.change_percentage_20d.toFixed(2)}%` : '-'}
-                      </td>
-                      {/* 50D */}
-                      <td className={`px-4 py-4 text-right font-mono text-xs ${(stock.change_percentage_50d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_50d || 0) < 0 ? 'text-blue-400' : 'text-gray-500'
-                        }`}>
-                        {stock.change_percentage_50d ? `${stock.change_percentage_50d > 0 ? '+' : ''}${stock.change_percentage_50d.toFixed(2)}%` : '-'}
-                      </td>
-                      {/* 200D */}
-                      <td className={`px-4 py-4 text-right font-mono text-xs ${(stock.change_percentage_200d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_200d || 0) < 0 ? 'text-blue-400' : 'text-gray-500'
-                        }`}>
-                        {stock.change_percentage_200d ? `${stock.change_percentage_200d > 0 ? '+' : ''}${stock.change_percentage_200d.toFixed(2)}%` : '-'}
-                      </td>
-
-                      {activeTab === 'stock' && (
-                        <>
-                          <td className="px-6 py-4 whitespace-nowrap">{stock.last_buy_date || '-'}</td>
-                          <td className="px-6 py-4 whitespace-nowrap">{stock.last_sell_date || '-'}</td>
-                          <td className={`px-6 py-4 text-right font-bold ${(stock.realized_pl || 0) > 0 ? 'text-red-400' : (stock.realized_pl || 0) < 0 ? 'text-blue-400' : 'text-gray-500'
-                            }`}>
-                            {stock.realized_pl ? `${stock.realized_pl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
-                          </td>
-                          <td className="px-4 py-4 text-right text-xs text-gray-500">
-                            {stock.first_import_date ? new Date(stock.first_import_date).toLocaleDateString() : '-'}
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {sortedStocks.length === 0 && (
-                <div className="p-8 text-center text-gray-500">
-                  {activeTab === 'stock' ? t('noStocksFound') : "No Indices / ETFs found"}
-                </div>
-              )}
+          {/* Quick Filters */}
+          <div>
+            <label className="text-xs uppercase font-bold text-gray-500 mb-1 block tracking-wider">Filter</label>
+            <div className="flex bg-black rounded p-1 border border-gray-700">
+              <button onClick={() => handleFilterChange('all')} className={`px-3 py-1 rounded text-sm ${filterMode === 'all' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}>{t('filterAll')}</button>
+              <button onClick={() => handleFilterChange('holding')} className={`px-3 py-1 rounded text-sm ${filterMode === 'holding' ? 'bg-green-900 text-green-100' : 'text-gray-400 hover:text-white'}`}>{t('filterHolding')}</button>
+              <button onClick={() => handleFilterChange('past')} className={`px-3 py-1 rounded text-sm ${filterMode === 'past' ? 'bg-blue-900 text-blue-100' : 'text-gray-400 hover:text-white'}`}>{t('filterPast')}</button>
+              <button onClick={() => handleFilterChange('trending')} className={`px-3 py-1 rounded text-sm ${filterMode === 'trending' ? 'bg-purple-900 text-purple-100' : 'text-gray-400 hover:text-white'}`}>{t('filterTrending')}</button>
+              <button onClick={() => handleFilterChange('notes')} className={`px-3 py-1 rounded text-sm ${filterMode === 'notes' ? 'bg-yellow-900 text-yellow-100' : 'text-gray-400 hover:text-white'}`}>Has Notes</button>
+              <button onClick={() => handleFilterChange('star')} className={`px-3 py-1 rounded text-sm ${filterMode === 'star' ? 'bg-yellow-600 text-black' : 'text-gray-400 hover:text-white'}`}>★</button>
+              <button onClick={() => handleFilterChange('doubleCircle')} className={`px-3 py-1 rounded text-sm ${filterMode === 'doubleCircle' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white'}`}>◎</button>
+              <button onClick={() => handleFilterChange('circle')} className={`px-3 py-1 rounded text-sm ${filterMode === 'circle' ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'}`}>○</button>
             </div>
-          )}
+          </div>
 
-          {/* Pagination Controls */}
-          {!loading && filteredStocks.length > 0 && (
-            <div className="flex justify-center items-center gap-4 mt-6 pb-20">
+
+
+          {/* Filter Select (Advanced Settings embedded) + Saved Views */}
+          <div className="flex items-center gap-2">
+            <div className="flex flex-col">
+              <label className="text-xs uppercase font-bold text-gray-500 mb-1 block tracking-wider">Config</label>
+              <FilterSelect
+                onSelect={(criteria) => {
+                  if (criteria) handleApplyAdvancedFilter(criteria);
+                  else {
+                    setActiveCriteria(null);
+                    setFilterMode('all');
+                  }
+                }}
+                currentCriteria={activeCriteria}
+                onOpenDialog={() => setIsFilterDialogOpen(true)}
+                refreshKey={isFilterDialogOpen ? 1 : 0} // simple trigger to reload list if saved
+              />
+              <FilterDialog // Render Dialog here since we removed the block
+                isOpen={isFilterDialogOpen}
+                onClose={() => setIsFilterDialogOpen(false)}
+                onApply={handleApplyAdvancedFilter}
+                initialCriteria={activeCriteria || undefined}
+              />
+            </div>
+          </div>
+
+          <ColumnManager
+            allColumns={ALL_COLUMNS}
+            visibleColumns={visibleColumns}
+            onUpdateColumns={setVisibleColumns}
+            selectedViewId={selectedViewId}
+            onSelectView={setSelectedViewId}
+          />
+        </div>
+
+        {/* Active Filter Chips (Simplified: Show only CR/RS, hide detailed signals) */}
+        {
+          activeCriteria && (
+            <div className="flex flex-wrap gap-2 mb-4 px-1">
+              {activeCriteria.min_composite_rating && <span className="text-xs bg-gray-800 border border-gray-600 px-2 py-1 rounded">CR &gt; {activeCriteria.min_composite_rating}</span>}
+              {activeCriteria.min_rs_rating && <span className="text-xs bg-gray-800 border border-gray-600 px-2 py-1 rounded">RS &gt; {activeCriteria.min_rs_rating}</span>}
+              {/* Hidden Signals as requested */}
+            </div>
+          )
+        }
+
+        {/* Filters Summary */}
+        <div className="text-xs text-gray-500 mb-2 flex justify-between">
+          <span className="text-sm font-bold text-white">
+            Stocks: <span className="text-yellow-400">{filteredStocks.length}</span> <span className="text-gray-400">/</span> {stocks.length}
+          </span>
+          <span>Page {currentPage} of {totalPages}</span>
+        </div>
+
+        {/* Table */}
+        <div className="overflow-auto max-h-[75vh] rounded-lg border border-gray-800 shadow-xl bg-gray-900">
+          {loading ? (
+            <div className="p-12 text-center text-gray-500 animate-pulse">
+              {t('loading')}
+            </div>
+          ) : currentStocks.length === 0 ? (
+            <div className="p-12 text-center text-gray-500">
+              {t('noStocksFound')}
+            </div>
+          ) : (
+            <table className="w-full text-sm text-left min-w-max">
+              <thead className="text-xs text-gray-400 uppercase bg-black border-b border-gray-700 sticky top-0 z-20">
+                <tr>
+                  {ALL_COLUMNS.map(c => c.key).filter(key => visibleColumns.includes(key)).map(colKey => {
+                    const def = ALL_COLUMNS.find(c => c.key === colKey);
+                    return (
+                      <th key={colKey} className="px-4 py-3 whitespace-nowrap group" style={{ minWidth: def?.width, width: def?.width }}>
+                        <div className="flex flex-col gap-1">
+                          <div
+                            className="flex items-center cursor-pointer hover:text-white"
+                            onClick={() => handleSort(colKey as keyof Stock)}
+                          >
+                            {def?.label}
+                            <SortIcon colKey={colKey as keyof Stock} />
+                          </div>
+                          {/* Header Filter Input */}
+                          <HeaderFilter
+                            columnKey={colKey}
+                            title={def?.label || colKey}
+                            dataType={['symbol', 'company_name', 'sector', 'industry', 'note', 'status'].includes(colKey) ? 'string' : 'number'}
+                            onApply={(val) => handleColumnFilterChange(colKey, val)}
+                            currentFilter={columnFilters[colKey]}
+                          />
+                        </div>
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800">
+                {currentStocks.map(stock => (
+                  <tr
+                    key={stock.symbol}
+                    className="hover:bg-gray-800/50 transition duration-75 group cursor-pointer"
+                    onDoubleClick={() => router.push(`/stocks/${stock.symbol}`)}
+                  >
+                    {ALL_COLUMNS.map(c => c.key).filter(key => visibleColumns.includes(key)).map(colKey => (
+                      <td key={colKey} className="px-4 py-2 whitespace-nowrap">
+                        {renderCell(stock, colKey)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Pagination */}
+        {
+          totalPages > 1 && (
+            <div className="flex justify-center gap-2 mt-6">
               <button
                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                 disabled={currentPage === 1}
-                className="px-4 py-2 bg-gray-800 rounded disabled:opacity-50 hover:bg-gray-700 transition font-bold"
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded disabled:opacity-50"
               >
-                &larr; {t('prev') || 'Prev'}
+                {t('prev')}
               </button>
-              <span className="text-gray-400">
-                Page <span className="text-white font-bold">{currentPage}</span> of {totalPages}
-              </span>
+              <div className="flex items-center gap-1">
+                {Array.from({ length: Math.min(10, totalPages) }, (_, i) => {
+                  let p = i + 1;
+                  if (totalPages > 10) {
+                    // Simple sliding window logic or just show first 10
+                    // For now simple: if current > 6, shift
+                    if (currentPage > 6) p = currentPage - 5 + i;
+                    if (p > totalPages) return null;
+                  }
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => setCurrentPage(p)}
+                      className={`w-8 h-8 flex items-center justify-center rounded ${currentPage === p ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
+              </div>
               <button
                 onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                 disabled={currentPage === totalPages}
-                className="px-4 py-2 bg-gray-800 rounded disabled:opacity-50 hover:bg-gray-700 transition font-bold"
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded disabled:opacity-50"
               >
-                {t('next') || 'Next'} &rarr;
+                {t('next')}
               </button>
             </div>
-          )}
-        </div>
-        <FilterDialog
-          isOpen={isFilterDialogOpen}
-          onClose={() => setIsFilterDialogOpen(false)}
-          onApply={handleApplyAdvancedFilter}
-          onSaved={() => setFilterRefreshKey(p => p + 1)}
-          initialCriteria={activeCriteria || {}}
-        />
-      </div>
-    </main >
+          )
+        }
+      </main >
+
+      {/* Chart Popup */}
+      {
+        hoveredChartStock && (
+          <div className="fixed bottom-4 right-4 z-50 bg-gray-900 border border-gray-700 rounded shadow-2xl p-2 animate-in fade-in zoom-in duration-200 pointer-events-none">
+            <div className="text-xs font-bold text-gray-400 mb-1 flex justify-between">
+              <span>{hoveredChartStock.symbol} Daily Chart</span>
+            </div>
+            <MiniCandleChart dataJson={hoveredChartStock.daily_chart_data as string} width={600} height={300} />
+          </div>
+        )
+      }
+
+      {toastMsg && <Toast message={toastMsg} onClose={() => setToastMsg('')} />}
+    </div >
   );
 }

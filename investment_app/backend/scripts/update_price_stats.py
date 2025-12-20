@@ -42,6 +42,24 @@ def update_stats():
                 stock.change_percentage_50d = calc_change(50)
                 stock.change_percentage_200d = calc_change(200)
 
+                # Calc SMA Deviations
+                try:
+                    def set_dev(ma_col, attr_name):
+                        if ma_col in df.columns:
+                            ma_val = df[ma_col].iloc[-1]
+                            if pd.notna(ma_val) and ma_val != 0:
+                                dev = ((current_price - ma_val) / ma_val) * 100.0
+                                setattr(stock, attr_name, float(dev))
+                            else:
+                                setattr(stock, attr_name, None)
+                    
+                    set_dev('Close_MA5', 'deviation_5ma_pct')
+                    set_dev('Close_MA20', 'deviation_20ma_pct')
+                    set_dev('Close_MA50', 'deviation_50ma_pct')
+                    set_dev('Close_MA200', 'deviation_200ma_pct')
+                except Exception as ex:
+                    print(f"SMA Dev Calc Error {stock.symbol}: {ex}")
+
                 # Calc ATR(14)
                 try:
                     # TR = Max(|High - Low|, |High - PrevClose|, |Low - PrevClose|)

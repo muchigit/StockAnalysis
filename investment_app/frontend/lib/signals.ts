@@ -1,0 +1,17 @@
+export const SIGNAL_LABELS: Record<string, string> = {
+    signal_higher_200ma: '株価 > 200MA',
+    signal_near_200ma: '200MA付近',
+    signal_over_50ma: '株価 > 50MA',
+    signal_higher_50ma_than_200ma: '50MA > 200MA',
+    signal_sameslope_50_200: '50/200MA 同傾き',
+    signal_uptrand_200ma: '200MA 上昇中',
+    signal_high_volume: '出来高増',
+    signal_newhigh: '新高値 (全期間)',
+    signal_newhigh_200days: '新高値 (200日)',
+    signal_newhigh_100days: '新高値 (100日)',
+    signal_newhigh_50days: '新高値 (50日)',
+    signal_price_up: '株価上昇',
+    signal_break_atr: 'ATRブレイク',
+    signal_high_slope5ma: '5MA 急上昇',
+    signal_rebound_5ma: 'リバウンド 5MA',
+};

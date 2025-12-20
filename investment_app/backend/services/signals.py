@@ -186,5 +186,37 @@ def get_signal_functions():
         "high_volume": high_volume,
         "price_up": price_up,
         "break_atr": break_atr,
-        "high_slope5ma": high_slope5ma
+        "high_slope5ma": high_slope5ma,
+        "rebound_5ma": rebound_5ma
     }
+
+def rebound_5ma(data):
+    # Condition:
+    # 1. Current 5MA Slope > 0
+    # 2. 5MA Slope 5 days ago < 0
+    # 3. Close > 5MA
+    
+    if data.empty or len(data) < 7: return 0
+    
+    # 1. Current Slope > 0
+    current_slope = slope_5ma(None, data)
+    if current_slope <= 0: return 0
+    
+    # 3. Close > 5MA
+    if data['Close'].iloc[-1] <= data['Close_MA5'].iloc[-1]: return 0
+    
+    # 2. Slope 5 days ago < 0
+    # Slope calculation uses (Ma5[t] - Ma5[t-1]) / Ma5[t-1]
+    # We need slope at t-5. So we need Ma5[t-5] and Ma5[t-6].
+    # data.iloc[-1] is t. data.iloc[-6] is t-5. data.iloc[-7] is t-6.
+    
+    ma5_t5 = data['Close_MA5'].iloc[-6]
+    ma5_t6 = data['Close_MA5'].iloc[-7]
+    
+    if ma5_t6 == 0: return 0
+    
+    slope_t5 = (ma5_t5 - ma5_t6) / ma5_t6 * 1000
+    
+    if slope_t5 >= 0: return 0
+    
+    return 1

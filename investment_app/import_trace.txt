@@ -1,0 +1,11 @@
+[2025-12-18 20:26:15.395741] [Router] Received: ['G:/マイドライブ/Investment/InvestmentList.xlsx']
+[2025-12-18 20:26:15.396744] [Router] Processing: G:/マイドライブ/Investment/InvestmentList.xlsx
+[2025-12-18 20:26:15.396744] [Router] Finviz: ['G:/マイドライブ/Investment/InvestmentList.xlsx'], Moomoo: []
+[2025-12-18 20:26:15.396744] [Importer] Starting import for files: ['G:/マイドライブ/Investment/InvestmentList.xlsx']
+[2025-12-18 20:26:15.397911] [Importer] Processing file: G:/マイドライブ/Investment/InvestmentList.xlsx
+[2025-12-18 20:26:17.893739] [Importer] Scanning for header row...
+[2025-12-18 20:26:17.895738] [Importer] Header found at alias match row 0: ['symbol', 'company name', 'skip', 'info', 'comment', 'ibd50', 'new high', 'rs new high', 'my stock', 'composite rating', 'eps rating', 'rs rating', 'smr rating', 'acc/dis rating', 'group rel str rating', 'eps % change(latest qtr)', 'eps % change(prev qtr)', 'eps est % change(current qtr)', 'eps est % change(current yr)', 'sales % change(last qtr)', 'annual roe', 'annual profit margin (latest yr)', 'mgmt own %', 'qtrs of rising sponsorship', 'research text', 'stock data', 'memo']
+[2025-12-18 20:26:17.896739] [Importer] Found header at index 0
+[2025-12-18 20:26:18.801899] [Importer] Columns found: ['Symbol', 'Company Name', 'Skip', 'Info', 'Comment', 'IBD50', 'New High', 'RS New High', 'My Stock', 'Composite Rating', 'EPS Rating', 'RS Rating', 'SMR Rating', 'ACC/DIS Rating', 'Group Rel Str Rating', 'EPS % Change(Latest Qtr)', 'EPS % Change(Prev Qtr)', 'EPS EST % Change(Current Qtr)', 'EPS EST % Change(Current Yr)', 'Sales % Change(Last Qtr)', 'Annual ROE', 'Annual Profit Margin (Latest Yr)', 'Mgmt Own %', 'Qtrs of Rising Sponsorship', 'Research Text', 'Stock Data', 'Memo']
+[2025-12-18 20:26:18.801899] [Importer] [Import] Checking col: 'Symbol' -> 'symbol'
+[2025-12-18 20:26:18.802907] [Importer] [Import] Match found: Symbol

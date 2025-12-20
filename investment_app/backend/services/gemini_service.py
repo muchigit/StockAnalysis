@@ -154,17 +154,80 @@ class GeminiService:
         except TimeoutException:
             return False
 
-    def _scrape_response(self, driver):
-        # Try to get the last message text
-        # Generic selector for message content.
-        # This is fragile.
+    def generate_content(self, prompt: str) -> str:
+        """
+        Generate content using Gemini (standard chat).
+        Returns the generated text.
+        """
+        driver = self._setup_driver()
+        if not driver:
+            return "Error: Driver setup failed"
+        
+        result_text = ""
         try:
-            # Attempt to find the last markdown container
-            msgs = driver.find_elements(By.CSS_SECTO, ".message-content") # Hypothetical class
-            # Better: use body text or look for specific container
-            # Fallback: "Research Completed. Please check Gemini history."
-            return "Research Completed (Text scraping not fully implemented due to dynamic UI). Please check Gemini History."
-        except:
-            return "Research Completed."
+             # 1. Reset
+             driver.get("https://gemini.google.com/?hl=ja")
+             time.sleep(3)
+
+             # 2. Input
+             self._input_prompt(driver, prompt)
+
+             # 3. Send
+             self._click_send(driver)
+             
+             # 4. Wait for completion
+             # Wait for the "Stop generating" button to disappear or "Edit" icon to appear on the last message
+             # A simple way is to wait for the response container and stability
+             time.sleep(10) # Initial wait
+             
+             # Wait until send button is visible again (usually means generation stopped)
+             # or look for specific indicators
+             # We will just wait a fixed time + check length stability or similar for this MVP
+             # Better: Wait for .response-container
+             time.sleep(5) 
+             
+             # Scan for the last response
+             result_text = self._scrape_latest_response(driver)
+             
+        except Exception as e:
+            logger.error(f"Generation error: {e}")
+            result_text = f"Error: {e}"
+        finally:
+            driver.quit()
+            
+        return result_text
+
+    def _scrape_latest_response(self, driver):
+        try:
+            # Common selector for Gemini responses (may change)
+            # Strategy: Get all elements that look like message text
+            # Usually they are inside <message-content> or have specific attributes
+            # We'll try to get all text from the main scrollable area, filtering out user prompts
+            
+            # Selector for the model response text container. This is tricky without live inspection.
+            # Assuming 'model-response-text' or similar class is not consistent.
+            # However, usually there are valid block elements.
+            
+            # Let's try grabbing all 'p', 'li', 'pre' in the chat history container
+            # But we only want the LAST message.
+            
+            # Alternative: text of the last element with 'data-test-id="model-response"'?
+            # Or just return everything after the last user prompt?
+            
+            # Simple fallback: Get full page text and try to extract? No.
+            
+            # Attempt 1: Selenium finding generic message blocks
+            # This selector represents the response text container in some versions
+            responses = driver.find_elements(By.CSS_SELECTOR, ".model-response-text") 
+            if not responses:
+                 # Fallback
+                 return "Error: Could not locate response text in DOM."
+                 
+            return responses[-1].text
+        except Exception as e:
+            return f"Scraping error: {e}"
+
+    def _scrape_response(self, driver):
+        return self._scrape_latest_response(driver)
 
 gemini_service = GeminiService()

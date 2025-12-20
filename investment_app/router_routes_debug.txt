@@ -1,0 +1,1 @@
+Routes: ['/automation/gen_content', '/automation/analyze', '/automation/import/files', '/automation/import/files', '/automation/refresh-data/{symbol}']
