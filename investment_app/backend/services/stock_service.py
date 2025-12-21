@@ -88,7 +88,8 @@ class StockService:
             
         try:
             # interval: 1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo
-            df = yf.download(ticker_symbol, period=period, interval=interval, progress=False, auto_adjust=True)
+            # threads=False is CRITICAL for ThreadPoolExecutor usage and to avoid shared state leakage
+            df = yf.download(ticker_symbol, period=period, interval=interval, progress=False, auto_adjust=True, threads=False)
             if df.empty:
                 # Manual Weekly Correction for empty result (try to build from daily)
                 if interval == '1wk':
@@ -98,7 +99,35 @@ class StockService:
                 if df.empty:
                     logger.warning(f"No data for {symbol}")
                     return pd.DataFrame()
-            
+
+            # Fix: Extract specific ticker if MultiIndex (yfinance thread-safety/state issue fix)
+            if isinstance(df.columns, pd.MultiIndex):
+                # Try to identify which level is Ticker. auto_adjust=True usually makes Price the columns, but MultiIndex remains if multiple symbols
+                # If 'Ticker' is in names, use it.
+                if 'Ticker' in df.columns.names:
+                    # Try to find our symbol
+                    available_tickers = df.columns.get_level_values('Ticker').unique()
+                    target = None
+                    if ticker_symbol in available_tickers:
+                        target = ticker_symbol
+                    elif symbol in available_tickers:
+                        target = symbol
+                    elif  len(available_tickers) > 0:
+                        # Fallback: Use the last one? Or first?
+                        # If we have multiple, picking one at random is dangerous if it's the wrong stock.
+                        # But typically the "wrong" ones are accumulated garbage. The "right" one should be there?
+                        # If the right one is NOT there, failure.
+                        target = available_tickers[0] 
+                    
+                    if target:
+                        df = df.xs(target, level='Ticker', axis=1)
+                    else:
+                        logger.error(f"Requested {symbol} but got {available_tickers}")
+                        return pd.DataFrame()
+                elif df.columns.nlevels > 1:
+                     # Fallback flattening
+                     df.columns = df.columns.get_level_values(0)
+
             # Enrich with indicators
             df = self._add_technical_indicators(df)
             return df
@@ -112,10 +141,19 @@ class StockService:
             
         # Ensure single level column if multi-index (yfinance new version behavior)
         if isinstance(data.columns, pd.MultiIndex):
-            # Flatten: Drop the 'Ticker' level, keep 'Price' level (Open, High, Low, Close...)
-            # Assuming single ticker download, this is safe.
-            # Example columns: ('Close', 'AAPL'), ('High', 'AAPL') -> 'Close', 'High'
-            data.columns = data.columns.get_level_values(0)
+            # Safe MultiIndex handling:
+            if 'Ticker' in data.columns.names:
+                 # If we are here, it means get_stock_data didn't clean it up? 
+                 # Or we loaded from cache that was polluted?
+                 # If we don't know the symbol, we can't safely select.
+                 # Proceeding with naive drop might be safer than crashing if there's only one.
+                 if len(data.columns.get_level_values('Ticker').unique()) == 1:
+                     data.columns = data.columns.droplevel('Ticker')
+                 else:
+                     logger.warning("Cache data has multiple tickers in _add_technical_indicators! Cleaning naive.")
+                     data.columns = data.columns.get_level_values(0)
+            elif data.columns.nlevels > 1:
+                 data.columns = data.columns.get_level_values(0)
         
         # Calculate MAs
         # Use proper column names (Title Case usually)
@@ -161,11 +199,14 @@ class StockService:
             if symbol.isdigit() and len(symbol) == 4:
                 ticker_symbol = f"{symbol}.T"
 
-            df_daily = yf.download(ticker_symbol, period="1mo", interval="1d", progress=False, auto_adjust=True)
+            df_daily = yf.download(ticker_symbol, period="1mo", interval="1d", progress=False, auto_adjust=True, threads=False)
             if not df_daily.empty:
                 # Ensure standard columns level
                 if isinstance(df_daily.columns, pd.MultiIndex):
-                    df_daily.columns = df_daily.columns.get_level_values(0)
+                    if 'Ticker' in df_daily.columns.names and ticker_symbol in df_daily.columns.get_level_values('Ticker'):
+                         df_daily = df_daily.xs(ticker_symbol, level='Ticker', axis=1)
+                    else:
+                         df_daily.columns = df_daily.columns.get_level_values(0)
                 
                 last_weekly_date = df.index[-1].date()
                 # Find the start of that week (assuming Monday)

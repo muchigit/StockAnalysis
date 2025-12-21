@@ -1,6 +1,6 @@
 "use client";
 
-import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickData, HistogramData, SeriesMarker, LineStyle } from 'lightweight-charts';
+import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickData, HistogramData, SeriesMarker, LineStyle, PriceScaleMode } from 'lightweight-charts';
 import { useEffect, useRef, useState } from 'react';
 
 // ... imports
@@ -28,7 +28,8 @@ interface ChartProps {
 export const StockChart = (props: ChartProps & {
     smas?: { key: string, color: string }[],
     visibleBars?: number,
-    interval?: '1d' | '1wk' | '1mo' // Added interval prop
+    interval?: '1d' | '1wk' | '1mo', // Added interval prop
+    logScale?: boolean // Added logScale prop
 }) => {
     const {
         data,
@@ -40,7 +41,8 @@ export const StockChart = (props: ChartProps & {
         height = 400,
         smas = [],
         visibleBars,
-        interval = '1d' // Default to 1d
+        interval = '1d', // Default to 1d
+        logScale = false
     } = props;
 
 
@@ -92,6 +94,7 @@ export const StockChart = (props: ChartProps & {
             },
             rightPriceScale: {
                 borderColor: '#475569',
+                mode: logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
             },
             crosshair: {
                 // We'll handle the tooltip ourselves
@@ -250,7 +253,7 @@ export const StockChart = (props: ChartProps & {
             chart.remove();
             chartRef.current = null;
         };
-    }, [data, markers, backgroundColor, textColor, height, smas, visibleBars, interval]);
+    }, [data, markers, backgroundColor, textColor, height, smas, visibleBars, interval, logScale]);
 
     return (
         <div className="relative w-full group">

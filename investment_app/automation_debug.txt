@@ -414,3 +414,123 @@ Content Start: AXSM [%COMPANYNAME%] 分析レポート(2025-12-20)
 # 依頼事項
 以下...
 Replaced with: Axsome Therapeutics, Inc.
+
+--- Processing AXSM ---
+Template has COMPANYNAME? True
+Content Start: AXSM [%COMPANYNAME%] 分析レポート(2025-12-21)
+
+# 依頼事項
+以下...
+Replaced with: Axsome Therapeutics, Inc.
+
+--- Processing CFBK ---
+Template has COMPANYNAME? True
+Content Start: CFBK [%COMPANYNAME%] 分析レポート(2025-12-21)
+
+# 依頼事項
+以下...
+Replaced with: CF Bankshares Inc.
+
+--- Processing AXSM ---
+Template has COMPANYNAME? True
+Content Start: AXSM [%COMPANYNAME%] 分析レポート(2025-12-21)
+
+# 依頼事項
+以下...
+Replaced with: Axsome Therapeutics, Inc.
+
+--- Processing CFBK ---
+Template has COMPANYNAME? True
+Content Start: CFBK [%COMPANYNAME%] 分析レポート(2025-12-21)
+
+# 依頼事項
+以下...
+Replaced with: CF Bankshares Inc.
+
+--- Processing HII ---
+Template has COMPANYNAME? True
+Content Start: HII [%COMPANYNAME%] 分析レポート(2025-12-21)
+
+# 依頼事項
+以下で...
+Replaced with: Huntington Ingalls Industries, Inc.
+
+--- Processing KAR ---
+Template has COMPANYNAME? True
+Content Start: KAR [%COMPANYNAME%] 分析レポート(2025-12-21)
+
+# 依頼事項
+以下で...
+Replaced with: OPENLANE, Inc.
+
+--- Processing KNSA ---
+Template has COMPANYNAME? True
+Content Start: KNSA [%COMPANYNAME%] 分析レポート(2025-12-21)
+
+# 依頼事項
+以下...
+Replaced with: Kiniksa Pharmaceuticals International, plc
+
+--- Processing MIRM ---
+Template has COMPANYNAME? True
+Content Start: MIRM [%COMPANYNAME%] 分析レポート(2025-12-21)
+
+# 依頼事項
+以下...
+Replaced with: Mirum Pharmaceuticals, Inc.
+
+--- Processing MLI ---
+Template has COMPANYNAME? True
+Content Start: MLI [%COMPANYNAME%] 分析レポート(2025-12-21)
+
+# 依頼事項
+以下で...
+Replaced with: Mueller Industries, Inc.
+
+--- Processing MNST ---
+Template has COMPANYNAME? True
+Content Start: MNST [%COMPANYNAME%] 分析レポート(2025-12-21)
+
+# 依頼事項
+以下...
+Replaced with: Monster Beverage Corporation
+
+--- Processing WWD ---
+Template has COMPANYNAME? True
+Content Start: WWD [%COMPANYNAME%] 分析レポート(2025-12-21)
+
+# 依頼事項
+以下で...
+Replaced with: Woodward, Inc.
+
+--- Processing GRRR ---
+Template has COMPANYNAME? True
+Content Start: GRRR [%COMPANYNAME%] 分析レポート(2025-12-21)
+
+# 依頼事項
+以下...
+Replaced with: Gorilla Technology Group Inc.
+
+--- Processing GRRR ---
+Template has COMPANYNAME? True
+Content Start: GRRR [%COMPANYNAME%] 分析レポート(2025-12-21)
+
+# 依頼事項
+以下...
+Replaced with: Gorilla Technology Group Inc.
+
+--- Processing PKE ---
+Template has COMPANYNAME? True
+Content Start: PKE [%COMPANYNAME%] 分析レポート(2025-12-21)
+
+# 依頼事項
+以下で...
+Replaced with: Park Aerospace Corp.
+
+--- Processing POM ---
+Template has COMPANYNAME? True
+Content Start: POM [%COMPANYNAME%] 分析レポート(2025-12-21)
+
+# 依頼事項
+以下で...
+Replaced with: Pomdoctor Limited

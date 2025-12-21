@@ -82,7 +82,7 @@ export default function DeepResearchPage() {
         setLoading(true);
         try {
             await startResearch(symbols, prompt.content);
-            setSymbolsText(""); // Clear input on success? Or keep? Let's clear to avoid duplicate run
+            // setSymbolsText(""); // Keep symbols populated as requested
             updateStatus();
         } catch (e) {
             alert(t('failedToStart'));

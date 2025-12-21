@@ -416,7 +416,76 @@ export async function deleteViewConfig(id: number): Promise<void> {
   const res = await fetch(`${API_URL}/views/${id}`, { method: 'DELETE' });
   if (!res.ok) throw new Error('Failed to delete view');
 }
+// Historical Analysis
+export interface HistoricalSignalRequest {
+  target_date: string; // YYYY-MM-DD
+  end_date?: string;
+  universe?: string;
+}
 
+export interface SignalResult {
+  symbol: string;
+  company_name: string;
+  entry_price: number;
+  current_price: number;
+  return_pct: number;
+  max_return_pct: number;
+  min_return_pct: number;
+  active_signals: string[];
+  status: string;
+  daily_change_pct?: number;
+  dev_ma5?: number;
+  dev_ma20?: number;
+  dev_ma50?: number;
+  dev_ma200?: number;
+  asset_type?: string;
+}
+
+export async function analyzeHistoricalSignals(req: HistoricalSignalRequest, onProgress?: (current: number, total: number) => void): Promise<SignalResult[]> {
+  const res = await fetch(`${API_URL}/analytics/historical-signal`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req)
+  });
+
+  if (!res.ok) {
+    throw new Error(`Analysis failed: ${res.status}`);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("Response body is not readable");
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalResults: SignalResult[] = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || ''; // Keep incomplete line
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line);
+        if (event.type === 'progress') {
+          if (onProgress) onProgress(event.current, event.total);
+        } else if (event.type === 'complete') {
+          finalResults = event.data;
+        }
+      } catch (e) {
+        console.error("Error parsing stream line:", line, e);
+      }
+    }
+  }
+
+  return finalResults;
+}
+
+// Gemini
 export async function generateText(prompt: string): Promise<string> {
   const res = await fetch(`${API_URL}/automation/research/gen_content`, {
     method: 'POST',

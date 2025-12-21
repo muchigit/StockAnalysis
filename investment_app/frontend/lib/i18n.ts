@@ -122,7 +122,8 @@ const dictionary = {
         failedToStart: "Failed to start research",
         addedToResearch: "Added {{symbol}} to Deep Research list 🧠",
         indexAdded: "Index added successfully",
-        failedToAddIndex: "Failed to add index"
+        failedToAddIndex: "Failed to add index",
+        reportsUpdated: "Reports updated"
     },
     ja: {
         dashboardTitle: "投資ダッシュボード",
@@ -243,7 +244,8 @@ const dictionary = {
         failedToStart: "開始に失敗しました",
         addedToResearch: "Deep Researchリストに追加しました 🧠: {{symbol}}",
         indexAdded: "インデックスを追加しました",
-        failedToAddIndex: "インデックスの追加に失敗しました"
+        failedToAddIndex: "インデックスの追加に失敗しました",
+        reportsUpdated: "レポート情報を更新しました"
     }
 };
 

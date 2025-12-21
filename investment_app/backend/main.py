@@ -31,6 +31,8 @@ from .routers import automation_router
 app.include_router(automation_router.router)
 from .routers import views
 app.include_router(views.router)
+from .routers import analytics
+app.include_router(analytics.router)
 # from .routers import automation_router_v2
 # app.include_router(automation_router_v2.router)
 

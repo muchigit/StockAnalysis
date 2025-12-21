@@ -27,13 +27,17 @@ export default function StockDetailPage() {
     const [analysis, setAnalysis] = useState<AnalysisResult[]>([]);
     const [loading, setLoading] = useState(true);
     const [savingNote, setSavingNote] = useState(false);
+    const [logScale, setLogScale] = useState(true); // Default to Log Scale
 
-    // Prompts
+    // Prompts (Restored)
     const [prompts, setPrompts] = useState<GeminiPrompt[]>([]);
     const [selectedPromptId, setSelectedPromptId] = useState<number | string>("");
     const [copyingPrompt, setCopyingPrompt] = useState(false);
     const [toastMsg, setToastMsg] = useState('');
     const [runningGemini, setRunningGemini] = useState(false);
+
+    // Reports (New)
+    const [refreshingAnalysis, setRefreshingAnalysis] = useState(false);
 
     useEffect(() => {
         if (symbol) {
@@ -74,6 +78,7 @@ export default function StockDetailPage() {
                     setSelectedPromptId(p[0].id.toString());
                 }
             }
+
         } catch (e) {
             console.error(e);
         } finally {
@@ -178,6 +183,21 @@ export default function StockDetailPage() {
             alert("Gemini Run Failed: " + e);
         } finally {
             setRunningGemini(false);
+        }
+    }
+
+    async function handleRefreshAnalysis() {
+        if (!stock) return;
+        setRefreshingAnalysis(true);
+        try {
+            const a = await fetchStockAnalysis(stock.symbol);
+            setAnalysis(a);
+            setToastMsg('レポートを更新しました');
+        } catch (e) {
+            console.error(e);
+            alert("更新に失敗しました: " + e);
+        } finally {
+            setRefreshingAnalysis(false);
         }
     }
 
@@ -484,6 +504,15 @@ export default function StockDetailPage() {
                         <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
                             <div className="flex justify-between items-center mb-4">
                                 <h2 className="text-xl font-bold text-gray-300">{t('priceChart')} ({t('dailyChart')})</h2>
+                                <div className="flex items-center gap-2">
+                                    <span className={`text-xs ${logScale ? 'text-blue-400 font-bold' : 'text-gray-500'}`}>Log</span>
+                                    <button
+                                        onClick={() => setLogScale(!logScale)}
+                                        className={`w-10 h-5 flex items-center bg-gray-700 rounded-full p-1 duration-300 ease-in-out ${logScale ? 'bg-blue-600' : ''}`}
+                                    >
+                                        <div className={`bg-white w-3 h-3 rounded-full shadow-md transform duration-300 ease-in-out ${logScale ? 'translate-x-5' : ''}`}></div>
+                                    </button>
+                                </div>
                             </div>
                             {chartDataDaily.length > 0 ? (
                                 <div className="bg-white p-2 rounded">
@@ -495,6 +524,7 @@ export default function StockDetailPage() {
                                         smas={smaDaily}
                                         visibleBars={zoomDaily}
                                         interval="1d"
+                                        logScale={logScale}
                                     />
                                 </div>
                             ) : (
@@ -517,6 +547,7 @@ export default function StockDetailPage() {
                                         smas={smaWeekly}
                                         visibleBars={zoomWeekly}
                                         interval="1wk"
+                                        logScale={logScale}
                                     />
                                 </div>
                             ) : (
@@ -546,7 +577,52 @@ export default function StockDetailPage() {
                             <div className="mt-8 pt-8 border-t border-gray-700 flex-1">
                                 {stock.asset_type !== 'index' && (
                                     <>
-                                        <h2 className="text-xl font-bold mb-4 text-gray-300">{t('geminiAnalysis')}</h2>
+                                        <div className="mb-4">
+                                            {/* Prompt Selector (Added back by request) */}
+                                            {stock.asset_type !== 'index' && (
+                                                <div className="flex items-center gap-2 mb-2 p-2 bg-gray-900 rounded border border-gray-700">
+                                                    <select
+                                                        value={selectedPromptId}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value;
+                                                            setSelectedPromptId(val);
+                                                            localStorage.setItem('lastSelectedPromptId', val);
+                                                        }}
+                                                        className="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-blue-500 flex-1 w-full"
+                                                    >
+                                                        {prompts.map(p => (
+                                                            <option key={p.id} value={p.id}>{p.name}</option>
+                                                        ))}
+                                                    </select>
+                                                    <button
+                                                        onClick={handleCopyPrompt}
+                                                        disabled={copyingPrompt || !selectedPromptId}
+                                                        className="px-2 py-1 bg-purple-600 hover:bg-purple-500 rounded text-white font-bold text-xs disabled:opacity-50 transition min-w-[30px]"
+                                                        title="Copy Prompt"
+                                                    >
+                                                        {copyingPrompt ? '...' : '📋'}
+                                                    </button>
+                                                    <button
+                                                        onClick={handleRunGemini}
+                                                        disabled={runningGemini || !selectedPromptId}
+                                                        className="px-2 py-1 bg-blue-600 hover:bg-blue-500 rounded text-white font-bold text-xs disabled:opacity-50 transition min-w-[30px]"
+                                                        title="Run Gemini & Insert"
+                                                    >
+                                                        {runningGemini ? '...' : '✨'}
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h2 className="text-xl font-bold text-gray-300">AI生成レポート分析</h2>
+                                            <button
+                                                onClick={handleRefreshAnalysis}
+                                                disabled={refreshingAnalysis}
+                                                className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-gray-300 transition"
+                                            >
+                                                {refreshingAnalysis ? '更新中...' : '再読み込み 🔄'}
+                                            </button>
+                                        </div>
                                         {analysis.length > 0 ? (
                                             <div className="space-y-4 max-h-[300px] overflow-y-auto">
                                                 {analysis.map((a) => (
@@ -564,7 +640,7 @@ export default function StockDetailPage() {
                                                                     }}
                                                                     className="text-xs bg-blue-900 text-blue-300 px-2 py-1 rounded hover:bg-blue-800 transition border border-blue-800"
                                                                 >
-                                                                    {t('openReport')} 📄
+                                                                    Google Docを開く 📄
                                                                 </button>
                                                             )}
                                                         </div>
@@ -687,41 +763,7 @@ export default function StockDetailPage() {
                                 </div>
                             )}
 
-                            {stock.asset_type !== 'index' && (
-                                <div className="mt-8 pt-8 border-t border-gray-700">
-                                    <div className="flex items-center gap-2">
-                                        <select
-                                            value={selectedPromptId}
-                                            onChange={(e) => {
-                                                const val = e.target.value;
-                                                setSelectedPromptId(val);
-                                                localStorage.setItem('lastSelectedPromptId', val);
-                                            }}
-                                            className="bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-blue-500 flex-1 w-full"
-                                        >
-                                            {prompts.map(p => (
-                                                <option key={p.id} value={p.id}>{p.name}</option>
-                                            ))}
-                                        </select>
-                                        <button
-                                            onClick={handleCopyPrompt}
-                                            disabled={copyingPrompt || !selectedPromptId}
-                                            className="px-2 py-1 bg-purple-600 hover:bg-purple-500 rounded text-white font-bold text-xs disabled:opacity-50 transition min-w-[30px]"
-                                            title={t('copyPrompt')}
-                                        >
-                                            {copyingPrompt ? '...' : '📋'}
-                                        </button>
-                                        <button
-                                            onClick={handleRunGemini}
-                                            disabled={runningGemini || !selectedPromptId}
-                                            className="px-2 py-1 bg-blue-600 hover:bg-blue-500 rounded text-white font-bold text-xs disabled:opacity-50 transition min-w-[30px]"
-                                            title="Run Gemini & Insert to Note"
-                                        >
-                                            {runningGemini ? '...' : '✨'}
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
+
                         </div>
                     </div>
                 </div>

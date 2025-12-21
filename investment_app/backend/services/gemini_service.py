@@ -16,41 +16,30 @@ COOKIE_FILE_PATH = r"C:\Users\uchida\GeminiAutomation\google_cookies.pkl"
 SCREENSHOT_DIR = r"C:\Users\uchida\GeminiAutomation\screenshots"
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
+import subprocess
+from selenium import webdriver
+
 class GeminiService:
     def __init__(self):
         self.driver = None
 
     def _setup_driver(self):
-        options = uc.ChromeOptions()
-        options.add_argument("--lang=ja-JP")
-        options.add_experimental_option('prefs', {'intl.accept_languages': 'ja,en-US,en'})
-        # Headless might be detected, stick to headful for now as per original script
-        options.add_argument('--window-size=1920,1080')
-        
-        driver = uc.Chrome(options=options)
-        
-        # Load cookies
-        driver.get("https://gemini.google.com/?hl=ja")
         try:
-            with open(COOKIE_FILE_PATH, 'rb') as f:
-                cookies = pickle.load(f)
-            for cookie in cookies:
-                if 'expiry' in cookie and isinstance(cookie['expiry'], float):
-                    cookie['expiry'] = int(cookie['expiry'])
-                try:
-                    driver.add_cookie(cookie)
-                except Exception as e:
-                    # Ignore invalid domain cookies
-                    pass
-            logger.info("Cookies loaded.")
-            driver.get("https://gemini.google.com/?hl=ja")
-            time.sleep(5)
-        except Exception as e:
-            logger.error(f"Cookie load failed: {e}")
-            driver.quit()
-            return None
+            # Assume Chrome is already launched manually on port 9222
+            logger.info("Connecting to existing Chrome on port 9222...")
             
-        return driver
+            options = webdriver.ChromeOptions()
+            options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
+            
+            logger.info("Attempting to connect Selenium to debuggerAddress 127.0.0.1:9222")
+            # Use standard Selenium, not uc, for attaching to existing debugger
+            driver = webdriver.Chrome(options=options)
+            logger.info("Selenium connected successfully.")
+            return driver
+            
+        except Exception as e:
+            logger.error(f"Failed to setup driver: {e}", exc_info=True)
+            return None
 
     def analyze_stock(self, symbol: str, prompt: str):
         """
@@ -103,9 +92,14 @@ class GeminiService:
         except Exception as e:
             logger.error(f"Error during analysis: {e}")
             result_text = f"Error: {str(e)}"
-            driver.save_screenshot(os.path.join(SCREENSHOT_DIR, f"error_{symbol}.png"))
+            try:
+                driver.save_screenshot(os.path.join(SCREENSHOT_DIR, f"error_{symbol}.png"))
+            except:
+                pass
         finally:
-            driver.quit()
+            # Do NOT quit driver as it closes the persistent browser instance
+            # driver.quit()
+            pass
             
         return result_text
 
@@ -193,7 +187,9 @@ class GeminiService:
             logger.error(f"Generation error: {e}")
             result_text = f"Error: {e}"
         finally:
-            driver.quit()
+             # Do NOT quit driver as it closes the persistent browser instance
+             # driver.quit()
+             pass
             
         return result_text
 

@@ -13,6 +13,7 @@ import ColumnManager from '@/components/ColumnManager';
 import HeaderFilter, { ColumnFilterValue } from '@/components/HeaderFilter';
 import SystemStatusBanner from '@/components/SystemStatusBanner';
 import MiniCandleChart from '@/components/MiniCandleChart';
+import { exportToExcel } from '@/lib/excel-exporter';
 
 
 const DEFAULT_COLUMNS = ['symbol', 'company_name', 'sector', 'industry', 'composite_rating', 'rs_rating', 'note', 'latest_analysis', 'status', 'change_percentage_1d', 'change_percentage_5d', 'change_percentage_20d', 'change_percentage_50d', 'change_percentage_200d', 'last_buy_date', 'last_sell_date', 'daily_chart_data', 'daily_chart_data_large', 'market_cap', 'realized_pl', 'first_import_date'];
@@ -379,6 +380,65 @@ export default function Home() {
     updateUrl({ adv: null });
   };
 
+  const handleExportExcel = async () => {
+    // Columns for export
+    // 1. Filter out Charts and 2. Use visibleColumns order
+    const cols = visibleColumns
+      .filter(key => key !== 'daily_chart_data' && key !== 'daily_chart_data_large')
+      .map(key => {
+        const def = ALL_COLUMNS.find(c => c.key === key);
+        let type: 'string' | 'number' | 'percentage' | 'date' = 'string';
+
+        if (key.includes('percentage') || key.includes('deviation_')) {
+          type = 'percentage';
+        } else if (['current_price', 'market_cap', 'realized_pl', 'composite_rating', 'rs_rating'].includes(key)) {
+          type = 'number';
+        } else if (key.includes('date') || key.includes('updated_at')) {
+          type = 'date';
+        }
+
+        return {
+          key: key,
+          header: def?.label || key,
+          width: def?.width ? def.width / 7 : 15,
+          type: type
+        };
+      });
+
+    // Info Sheet Data
+    const summary: Record<string, string | number> = {
+      '出力日時': new Date().toLocaleString(),
+      '銘柄数': sortedStocks.length,
+      '表示タブ': activeTab === 'stock' ? '個別株' : '指数',
+      'フィルタモード': filterMode,
+      '検索ワード': appliedQuery || '(なし)',
+    };
+
+    if (activeCriteria) {
+      summary['詳細フィルタ'] = Object.entries(activeCriteria)
+        .filter(([_, v]) => v !== undefined && v !== null && v !== false)
+        .map(([k, v]) => `${k}:${v}`)
+        .join(', ');
+    }
+
+    const activeColFilters = Object.entries(columnFilters).filter(([_, v]) => v !== null);
+    if (activeColFilters.length > 0) {
+      summary['列フィルタ'] = activeColFilters.map(([k, v]) => {
+        if ('min' in v || 'max' in v) return `${k}(${v.min ?? ''}~${v.max ?? ''})`;
+        if ('selected' in v) return `${k}(${v.selected?.length})`;
+        return k;
+      }).join(', ');
+    }
+
+    await exportToExcel({
+      fileName: `dashboard_export_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      sheetName: 'Stocks',
+      summaryData: summary,
+      columns: cols,
+      data: sortedStocks // Export filtered and sorted data
+    });
+  };
+
   const handleColumnFilterChange = (key: string, value: ColumnFilterValue | null) => {
     setColumnFilters(prev => {
       const next = { ...prev };
@@ -405,6 +465,7 @@ export default function Home() {
 
       // 2. Tab Filter (Managed by API but good to double check or if mixed)
       // API handles asset_type, so we can assume stocks here are correct type unless mixed list.
+      if (activeTab === 'index') return true; // Bypass other filters for indices
 
       // 3. Quick Filters
       if (filterMode === 'holding') {
@@ -770,16 +831,39 @@ export default function Home() {
               <span>🧠</span>
               <span>{t('deepResearchTitle') || 'Deep Research'}</span>
             </Link>
+
+            <Link
+              href="/historical-analysis"
+              className="flex items-center gap-2 bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1.5 rounded shadow shadow-indigo-900/50 transition font-bold text-sm"
+            >
+              <span>📈</span>
+              <span>Historical</span>
+            </Link>
           </div>
 
           {/* AI Analysis Folder Button (Restored) */}
+          {/* AI Analysis (Reload Reports) */}
           <button
-            onClick={() => openAnalysisFolder().catch(e => alert(e))}
+            onClick={async () => {
+              await loadStocks();
+              alert(t('reportsUpdated') || "Reports updated");
+            }}
+            disabled={loading}
             className="flex items-center gap-2 bg-blue-700 hover:bg-blue-600 text-white px-3 py-1.5 rounded shadow shadow-blue-900/50 transition font-bold text-sm"
-            title="Open Analysis Folder"
+            title="Reload AI Reports for All Stocks"
           >
-            <span>📂</span>
-            <span>AI分析</span>
+            <span>🔄</span>
+            <span>AI分析(更新)</span>
+          </button>
+
+          {/* Export Button */}
+          <button
+            onClick={handleExportExcel}
+            className="flex items-center gap-2 bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded shadow shadow-green-900/50 transition font-bold text-sm"
+            title="Export to Excel"
+          >
+            <span>📊</span>
+            <span>Excel</span>
           </button>
 
           {/* Import Button (Moved here) */}
@@ -933,7 +1017,7 @@ export default function Home() {
             <table className="w-full text-sm text-left min-w-max">
               <thead className="text-xs text-gray-400 uppercase bg-black border-b border-gray-700 sticky top-0 z-20">
                 <tr>
-                  {ALL_COLUMNS.map(c => c.key).filter(key => visibleColumns.includes(key)).map(colKey => {
+                  {visibleColumns.map(colKey => {
                     const def = ALL_COLUMNS.find(c => c.key === colKey);
                     return (
                       <th key={colKey} className="px-4 py-3 whitespace-nowrap group" style={{ minWidth: def?.width, width: def?.width }}>
@@ -966,7 +1050,7 @@ export default function Home() {
                     className="hover:bg-gray-800/50 transition duration-75 group cursor-pointer"
                     onDoubleClick={() => router.push(`/stocks/${stock.symbol}`)}
                   >
-                    {ALL_COLUMNS.map(c => c.key).filter(key => visibleColumns.includes(key)).map(colKey => (
+                    {visibleColumns.map(colKey => (
                       <td key={colKey} className="px-4 py-2 whitespace-nowrap">
                         {renderCell(stock, colKey)}
                       </td>
