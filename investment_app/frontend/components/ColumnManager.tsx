@@ -267,15 +267,15 @@ export default function ColumnManager({ allColumns, visibleColumns, onUpdateColu
                 value={selectedViewId}
                 onChange={handleViewChange}
             >
-                <option value="">(Custom)</option>
+                <option value="">(カスタム)</option>
                 {views.map(v => (
                     <option key={v.id} value={v.id}>{v.name}</option>
                 ))}
             </select>
             {selectedViewId && (
-                <button title="Delete View" onClick={handleDeleteView} className="text-red-400 hover:text-red-300">✕</button>
+                <button title="ビューを削除" onClick={handleDeleteView} className="text-red-400 hover:text-red-300">✕</button>
             )}
-            <button title="Save View" onClick={handleSaveView} className="text-blue-400 hover:text-blue-300">💾</button>
+            <button title="ビューを保存" onClick={handleSaveView} className="text-blue-400 hover:text-blue-300">💾</button>
 
             {mounted && createPortal(modalContent, document.body)}
         </div>

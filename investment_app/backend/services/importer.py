@@ -57,7 +57,10 @@ class Importer:
                             # Sometimes they are CSVs named xls?
                             df = pd.read_csv(file_path, sep='\t') # Try tab?
                             
-                    # Normalize columns if needed
+                    # Normalize columns
+                    # Strip whitespace from all column names to ensure exact matching works
+                    df.columns = [str(c).strip() for c in df.columns]
+                    
                     # We look for 'Symbol', 'Ticker', 'Company Symbol'
                     symbol_col = None
                     self.log_debug(f"Columns found: {df.columns.tolist()}")
@@ -76,6 +79,11 @@ class Importer:
                         
                     # Process tickers
                     for _, row in df.iterrows():
+                        # Debug first row to see headers/keys
+                        if total_imported == 0:
+                            print(f"[Import Debug] First row keys: {list(row.keys())}")
+                            print(f"[Import Debug] First row values: {row.values}")
+
                         symbol = str(row[symbol_col]).strip()
                         if not symbol or symbol == 'nan': continue
                         
@@ -161,8 +169,16 @@ class Importer:
                             session.add(stock)
                         
 
+                        # Market Cap
+                        # Aliases: 'Market Cap', '時価総額'
+                        mcap_val = None
                         if 'Market Cap' in row and pd.notna(row['Market Cap']):
-                            val = str(row['Market Cap']).strip().upper()
+                            mcap_val = row['Market Cap']
+                        elif '時価総額' in row and pd.notna(row['時価総額']):
+                            mcap_val = row['時価総額']
+                            
+                        if mcap_val:
+                            val = str(mcap_val).strip().upper()
                             try:
                                 if val.endswith('B'):
                                     stock.market_cap = float(val.replace('B', '')) * 1e9
@@ -175,6 +191,55 @@ class Importer:
                             except:
                                 pass # Keep None if parse fails
                         
+                        # --- New Fields Import ---
+                        # Volume
+                        # Volume
+                        # Aliases: 'Volume', '出来高'
+                        vol_val = None
+                        if 'Volume' in row and pd.notna(row['Volume']):
+                            vol_val = row['Volume']
+                        elif '出来高' in row and pd.notna(row['出来高']):
+                            vol_val = row['出来高']
+                            
+                        if vol_val:
+                            val = str(vol_val).strip().replace(',', '')
+                            try:
+                                stock.volume = float(val)
+                            except: 
+                                print(f"[Import Debug] Failed to parse volume: {val}")
+                        else:
+                             # Only print sometimes to avoid spam
+                             if total_imported < 5:
+                                 print(f"[Import Debug] Volume not found for {symbol}. Keys checked: Volume, 出来高. Row keys present: {[k for k in row.keys() if 'Volume' in str(k) or '出来' in str(k)]}")
+                            
+                        # Volume % Change
+                        # Aliases: 'Volume % Change', 'Vol % Change', '出来高増加率'
+                        for v_col in ['Volume % Change', 'Vol % Change', '出来高増加率']:
+                            if v_col in row and pd.notna(row[v_col]):
+                                val = str(row[v_col]).strip().replace('%', '')
+                                try:
+                                    stock.volume_increase_pct = float(val)
+                                except: pass
+                        
+                        # Earnings Dates
+                        # Aliases: 'Earnings Date', 'Next Earnings Date', '次回決算日' -> next_earnings_date
+                        # Aliases: 'Last Earnings', '直近決算日' -> last_earnings_date
+                        
+                        def parse_dt(v):
+                            if isinstance(v, (datetime, pd.Timestamp)): return v
+                            try: return pd.to_datetime(v)
+                            except: return None
+
+                        for col in ['Next Earnings Date', 'Earnings Date', '次回決算日']:
+                            if col in row and pd.notna(row[col]):
+                                dt = parse_dt(row[col])
+                                if dt: stock.next_earnings_date = dt
+                                
+                        for col in ['Last Earnings', '直近決算日']:
+                            if col in row and pd.notna(row[col]):
+                                dt = parse_dt(row[col])
+                                if dt: stock.last_earnings_date = dt
+                                
                         stock.updated_at = datetime.utcnow()
                         total_imported += 1
                 except Exception as e:
@@ -296,6 +361,20 @@ class Importer:
                                 trade_date = datetime.strptime(clean_date, "%Y-%m-%d %H:%M:%S")
                             except:
                                 pass # Keep default utcnow if parsing fails
+
+                    # Check for duplicates
+                    # We assume duplicate if Symbol, Side, Qty, Price, Date match exactly.
+                    existing_trade = session.exec(select(TradeHistory).where(
+                        TradeHistory.symbol == symbol,
+                        TradeHistory.trade_type == side,
+                        TradeHistory.quantity == qty,
+                        TradeHistory.price == price,
+                        TradeHistory.trade_date == trade_date
+                    )).first()
+
+                    if existing_trade:
+                        print(f"Skipping duplicate trade: {symbol} {side} {qty} @ {price} on {trade_date}")
+                        continue
 
                     # Save to DB
                     trade = TradeHistory(

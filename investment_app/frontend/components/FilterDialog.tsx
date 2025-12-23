@@ -135,7 +135,7 @@ export default function FilterDialog({ isOpen, onClose, onApply, onSaved, initia
                     {/* Numeric Ranges */}
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-xs text-gray-500 mb-1">Min CR (総合評価)</label>
+                            <label className="block text-xs text-gray-500 mb-1">総合評価(CR) 最小</label>
                             <input
                                 type="number"
                                 value={criteria.min_composite_rating || ''}
@@ -144,7 +144,7 @@ export default function FilterDialog({ isOpen, onClose, onApply, onSaved, initia
                             />
                         </div>
                         <div>
-                            <label className="block text-xs text-gray-500 mb-1">Min RS (相対強度)</label>
+                            <label className="block text-xs text-gray-500 mb-1">相対強度(RS) 最小</label>
                             <input
                                 type="number"
                                 value={criteria.min_rs_rating || ''}
@@ -165,7 +165,7 @@ export default function FilterDialog({ isOpen, onClose, onApply, onSaved, initia
                             <option value="">指定なし</option>
                             <option value="Holding">{t('holding')}</option>
                             <option value="Past Trade">{t('pastTrade')}</option>
-                            <option value="None">監視中 (None)</option>
+                            <option value="None">監視中</option>
                         </select>
                     </div>
                 </div>

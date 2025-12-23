@@ -284,7 +284,7 @@ export default function HistoricalAnalysisPage() {
                 <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 space-y-4">
                     <div className="flex flex-col md:flex-row gap-4 items-end md:items-center">
                         <div>
-                            <label className="block text-xs text-gray-400 mb-1">基準日 (Target Date)</label>
+                            <label className="block text-xs text-gray-400 mb-1">基準日</label>
                             <input
                                 type="date"
                                 value={targetDate}
@@ -339,7 +339,7 @@ export default function HistoricalAnalysisPage() {
                     {analyzed && (
                         <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
                             <label className="block text-xs text-gray-400 mb-2 flex justify-between items-center">
-                                <span>計算基準日 (Calculation Date)</span>
+                                <span>計算基準日</span>
                                 <span className="font-bold text-lg text-white">{calcDate}</span>
                             </label>
                             <input

@@ -56,6 +56,12 @@ class Stock(SQLModel, table=True):
     change_percentage_5d: Optional[float] = None
     change_percentage_20d: Optional[float] = None
     change_percentage_50d: Optional[float] = None
+    
+    # New Fields
+    volume: Optional[float] = None
+    volume_increase_pct: Optional[float] = None
+    last_earnings_date: Optional[datetime] = None
+    next_earnings_date: Optional[datetime] = None
 
     change_percentage_200d: Optional[float] = None
     

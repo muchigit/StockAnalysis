@@ -22,6 +22,14 @@ app.add_middleware(
 
 app.include_router(stocks.router)
 app.include_router(automation.router)
+from backend.routers.system import router as system_router
+from backend.routers.trading import router as trading_router
+
+app.include_router(system_router)
+app.include_router(trading_router)
+
+from .routers.history import router as history_router
+app.include_router(history_router)
 from .routers import filters, system
 app.include_router(filters.router)
 app.include_router(system.router)
@@ -85,6 +93,8 @@ def start_scheduler():
 @app.get("/")
 def read_root():
     return {"message": "Welcome to Investment Management System API"}
+
+
 
 
 # Trigger Reload

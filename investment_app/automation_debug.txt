@@ -534,3 +534,27 @@ Content Start: POM [%COMPANYNAME%] 分析レポート(2025-12-21)
 # 依頼事項
 以下で...
 Replaced with: Pomdoctor Limited
+
+--- Processing ALLY ---
+Template has COMPANYNAME? True
+Content Start: ALLY [%COMPANYNAME%] 分析レポート(2025-12-23)
+
+# 依頼事項
+以下...
+Replaced with: Ally Financial Inc.
+
+--- Processing JBTM ---
+Template has COMPANYNAME? True
+Content Start: JBTM [%COMPANYNAME%] 分析レポート(2025-12-23)
+
+# 依頼事項
+以下...
+Replaced with: JBT Marel Corporation
+
+--- Processing WTFC ---
+Template has COMPANYNAME? True
+Content Start: WTFC [%COMPANYNAME%] 分析レポート(2025-12-23)
+
+# 依頼事項
+以下...
+Replaced with: Wintrust Financial Corporation

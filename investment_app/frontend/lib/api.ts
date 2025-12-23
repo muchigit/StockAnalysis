@@ -14,12 +14,20 @@ export interface Stock {
   last_buy_date?: string;
   last_sell_date?: string;
   realized_pl?: number;
+  unrealized_pl?: number;
+  average_cost?: number;
   change_percentage_1d?: number;
   atr_14?: number;
   change_percentage_5d?: number;
   change_percentage_20d?: number;
   change_percentage_50d?: number;
   change_percentage_200d?: number;
+
+  // New Fields
+  volume?: number;
+  volume_increase_pct?: number;
+  last_earnings_date?: string;
+  next_earnings_date?: string;
 
   // Deviations
   deviation_5ma_pct?: number;
@@ -69,6 +77,55 @@ export interface Stock {
   asset_type?: string;
 }
 
+// --- Trading API ---
+
+export interface TradingUnlockRequest {
+  password: string;
+}
+
+export interface OrderRequest {
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  qty: number;
+  order_type: 'NORMAL' | 'MARKET' | 'STOP' | 'STOP_LIMIT' | 'TRAILING_STOP' | 'TRAILING_STOP_LIMIT';
+  price?: number;
+  stop_price?: number;
+  time_in_force?: 'DAY' | 'GTC';
+  fill_outside_rth?: boolean;
+  // Advanced
+  stop_loss_enabled?: boolean;
+  stop_loss_price?: number;
+  // Trailing
+  trail_type?: 'RATIO' | 'AMOUNT';
+  trail_value?: number;
+  trail_spread?: number;
+}
+
+export const unlockTrade = async (password: string) => {
+  const res = await fetch(`${API_URL}/trading/unlock`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password })
+  });
+  if (!res.ok) throw new Error('Failed to unlock');
+  return res.json();
+};
+
+export const placeOrder = async (order: OrderRequest) => {
+  const res = await fetch(`${API_URL}/trading/order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(order)
+  });
+  return res.json();
+};
+
+export const getAccountInfo = async () => {
+  const res = await fetch(`${API_URL}/trading/account`);
+  if (!res.ok) throw new Error('Failed to fetch account info');
+  return res.json();
+};
+
 export interface ChartData {
   time: string;
   open: number;
@@ -90,6 +147,27 @@ export interface TradeHistory {
   tax?: number;
   total_amount?: number;
 }
+
+export interface HistoryAnalytics {
+  stats: {
+    total_pl: number;
+    win_rate: number;
+    total_trades: number;
+    monthly: Record<string, number>;
+    weekly: Record<string, number>;
+    yearly: Record<string, number>;
+  };
+  history: (TradeHistory & { realized_pl: number; roi_pct: number; cost_basis: number; avg_cost: number })[];
+}
+
+export const fetchHistoryAnalytics = async (): Promise<HistoryAnalytics> => {
+  const res = await fetch(`${API_URL}/history/analytics`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to fetch history');
+  }
+  return res.json();
+};
 
 export interface StockNote {
   symbol: string;

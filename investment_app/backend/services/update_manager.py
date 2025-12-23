@@ -177,6 +177,66 @@ class UpdateManager:
                          if df.empty or len(df) < 5:
                             if df.empty: raise Exception("Empty data")
                          
+                         # --- Fundamentals (Market Cap, Earnings) ---
+                         # Run this less frequently? Or every time? User requested "Update" so let's do it.
+                         try:
+                             print(f"[DEBUG] Fetching fundamentals for {sym}...")
+                             funds = stock_service.fetch_fundamentals(stock.symbol)
+                             if funds.get('market_cap'):
+                                 stock.market_cap = funds['market_cap']
+                                 print(f"[DEBUG] {sym} Market Cap: {stock.market_cap}")
+                             if funds.get('next_earnings_date'):
+                                 stock.next_earnings_date = funds['next_earnings_date']
+                             if funds.get('last_earnings_date'):
+                                 stock.last_earnings_date = funds['last_earnings_date']
+                         except Exception as e:
+                             print(f"Fundamentals fetch failed for {sym}: {e}")
+
+                         # --- Volume & Volume % ---
+                         try:
+                             print(f"[DEBUG] Calculating volume for {sym}...")
+                             # Find last row with valid Volume
+                             # df['Volume'] might have NaNs (e.g. today's incomplete data)
+                             # We want the last actual trading volume.
+                             valid_vol_mask = df['Volume'].notna() & (df['Volume'] > 0)
+                             if valid_vol_mask.any():
+                                 current_volume = df.loc[valid_vol_mask, 'Volume'].iloc[-1]
+                                 stock.volume = float(current_volume)
+                                 print(f"[DEBUG] {sym} Volume: {stock.volume}")
+                                 
+                                 # For increase %, compare with the volume BEFORE the last valid one
+                                 # We need the index of the last valid volume
+                                 last_valid_idx = df.index[valid_vol_mask][-1]
+                                 # Get position integer
+                                 pos = df.index.get_loc(last_valid_idx)
+                                 
+                                 if pos > 0:
+                                     # Previous volume is the one at pos-1? 
+                                     # Need to check if THAT one is valid? 
+                                     # Usually yes, but let's just take the row before.
+                                     # If there are gaps, we might want the last valid before that.
+                                     # Simplification: use shift on masked series?
+                                     valid_series = df.loc[valid_vol_mask, 'Volume']
+                                     if len(valid_series) >= 2:
+                                         prev_volume = valid_series.iloc[-2]
+                                         if prev_volume > 0:
+                                             stock.volume_increase_pct = ((current_volume - prev_volume) / prev_volume) * 100.0
+                                         else:
+                                             stock.volume_increase_pct = 0.0
+                                     else:
+                                         stock.volume_increase_pct = 0.0
+                                 else:
+                                     stock.volume_increase_pct = 0.0
+                             else:
+                                 # No valid volume in entire history??
+                                 stock.volume = None
+                                 stock.volume_increase_pct = None
+
+                         except Exception as e:
+                             print(f"Volume calc failed for {sym}: {e}")
+                             
+                         # Metadata Backfill (Sector/Industry)
+                         
                          # Metadata Backfill (Sector/Industry)
                          if not stock.sector or not stock.industry:
                              try:
@@ -307,6 +367,9 @@ class UpdateManager:
 
                          stock.updated_at = datetime.utcnow()
                          session.add(stock)
+                         
+                         # Add delay to prevent rate limiting (yfinance is sensitive)
+                         time.sleep(2)
                          
                          self.progress += 1
                          

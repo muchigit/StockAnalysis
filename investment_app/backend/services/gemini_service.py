@@ -170,15 +170,15 @@ class GeminiService:
              self._click_send(driver)
              
              # 4. Wait for completion
-             # Wait for the "Stop generating" button to disappear or "Edit" icon to appear on the last message
-             # A simple way is to wait for the response container and stability
-             time.sleep(10) # Initial wait
+             logger.info("Waiting for generation to complete...")
+             # Wait for the Send button to become clickable again (indicates generation finished)
+             send_button_xpath = "//button[contains(@aria-label, 'プロンプトを送信')]"
+             WebDriverWait(driver, 120).until(
+                 EC.element_to_be_clickable((By.XPATH, send_button_xpath))
+             )
              
-             # Wait until send button is visible again (usually means generation stopped)
-             # or look for specific indicators
-             # We will just wait a fixed time + check length stability or similar for this MVP
-             # Better: Wait for .response-container
-             time.sleep(5) 
+             # Small buffer to ensure text is fully rendered/stable
+             time.sleep(2) 
              
              # Scan for the last response
              result_text = self._scrape_latest_response(driver)

@@ -138,7 +138,7 @@ export default function DeepResearchPage() {
                             disabled={status?.is_running}
                         />
                         <div className="text-right text-xs text-gray-500">
-                            {symbolsText.split('\n').filter(s => s.trim()).length} symbols
+                            {symbolsText.split('\n').filter(s => s.trim()).length} 銘柄
                         </div>
                     </div>
 

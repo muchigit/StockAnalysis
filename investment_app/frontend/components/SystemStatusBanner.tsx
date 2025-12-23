@@ -27,30 +27,30 @@ export default function SystemStatusBanner() {
     const percentage = status.total > 0 ? Math.round((status.progress / status.total) * 100) : 0;
 
     let bgColor = "bg-gray-800/50"; // Transparent default
-    let statusText = "Ready";
+    let statusText = "待機中";
 
     if (status.status === 'running') {
         bgColor = "bg-blue-900/40 border-blue-500/30";
-        statusText = "Updating...";
+        statusText = "更新中...";
     }
     if (status.status === 'waiting_retry') {
         bgColor = "bg-yellow-900/40 border-yellow-500/30";
-        statusText = "Retrying...";
+        statusText = "再試行中...";
     }
     if (status.status === 'completed') {
         bgColor = "bg-green-900/20 border-green-500/30";
-        statusText = "Updated";
+        statusText = "更新完了";
     }
     if (status.status === 'error') {
         bgColor = "bg-red-900/40 border-red-500/30";
-        statusText = "Error";
+        statusText = "エラー";
     }
 
     const handleManualUpdate = async () => {
         try {
             await triggerSystemUpdate();
             // Optimistic update
-            setStatus(prev => prev ? { ...prev, status: 'running', message: 'Starting...' } : null);
+            setStatus(prev => prev ? { ...prev, status: 'running', message: '開始中...' } : null);
         } catch (e) {
             console.error("Failed to trigger update", e);
             alert("Failed to start update");
@@ -69,7 +69,7 @@ export default function SystemStatusBanner() {
 
                 {(status.status === 'idle' || status.status === 'completed') && (
                     <span className="text-gray-500 hidden xl:inline">
-                        Last: {status.last_completed ? new Date(status.last_completed).toLocaleString() : 'Never'}
+                        最終: {status.last_completed ? new Date(status.last_completed).toLocaleString() : '未実行'}
                     </span>
                 )}
             </div>

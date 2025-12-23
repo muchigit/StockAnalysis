@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { useTranslation } from '@/lib/i18n';
 import { useParams, useRouter } from 'next/navigation';
 import { SeriesMarker } from 'lightweight-charts';
+import TradingDialog from '@/components/Trading/TradingDialog';
 
 export default function StockDetailPage() {
     const { t } = useTranslation();
@@ -37,7 +38,9 @@ export default function StockDetailPage() {
     const [runningGemini, setRunningGemini] = useState(false);
 
     // Reports (New)
+    // Reports (New)
     const [refreshingAnalysis, setRefreshingAnalysis] = useState(false);
+    const [isTradingOpen, setIsTradingOpen] = useState(false);
 
     useEffect(() => {
         if (symbol) {
@@ -145,9 +148,12 @@ export default function StockDetailPage() {
         const pData = prompts.find(p => p.id === Number(selectedPromptId));
         if (!pData) return;
 
-        if (!confirm("プロンプトを実行してGeminiで生成しますか？\n(約20-30秒かかります)")) return;
+        // Removed confirmation dialog
+        // if (!confirm("プロンプトを実行してGeminiで生成しますか？\n(約20-30秒かかります)")) return;
 
         setRunningGemini(true);
+        setToastMsg("Geminiで生成中... (約20-30秒)"); // Show start toast
+
         try {
             let content = pData.content;
             // Basic vars
@@ -171,16 +177,17 @@ export default function StockDetailPage() {
 
             // Append to note
             const timestamp = new Date().toLocaleString();
-            const newNote = note ? (note + `\n\n--- Gemini Analysis (${timestamp}) ---\n` + text) : (`--- Gemini Analysis (${timestamp}) ---\n` + text);
+            // Removed header, added timestamp at end
+            const newNote = note ? (note + `\n\n${text}\n(${timestamp})`) : (`${text}\n(${timestamp})`);
 
             setNote(newNote);
             await saveStockNote(stock.symbol, newNote);
             setLastSavedNote(newNote);
-            alert("Analysis added to note!");
+            setToastMsg("メモに追記しました"); // Success toast
 
         } catch (e) {
             console.error(e);
-            alert("Gemini Run Failed: " + e);
+            setToastMsg("Geminiエラー: " + e); // Error toast
         } finally {
             setRunningGemini(false);
         }
@@ -289,7 +296,7 @@ export default function StockDetailPage() {
                         target="_blank"
                         rel="noopener noreferrer"
                         className="opacity-80 hover:opacity-100 transition"
-                        title="IBD Chart"
+                        title="IBDチャート"
                     >
                         <span className="text-sm bg-yellow-600 text-white px-2 py-1 rounded font-bold">I</span>
                     </a>
@@ -302,6 +309,16 @@ export default function StockDetailPage() {
                     >
                         <span className="text-sm bg-blue-600 text-white px-2 py-1 rounded font-bold">T</span>
                     </a>
+
+                    {/* Trade button hidden as OpenD is not available in JP
+                    <button
+                        onClick={() => setIsTradingOpen(true)}
+                        className="opacity-80 hover:opacity-100 transition mr-4 bg-green-700 text-white px-3 py-1 rounded font-bold text-sm border border-green-600 flex items-center gap-1"
+                        title="Trade"
+                    >
+                        <span>$</span> Trade
+                    </button>
+                    */}
 
                     <button
                         onClick={() => {
@@ -317,7 +334,7 @@ export default function StockDetailPage() {
                     <div className="mr-4">
                         <input
                             type="text"
-                            placeholder="Jump to..."
+                            placeholder="銘柄移動..."
                             className="bg-gray-800 text-white text-sm px-3 py-1 rounded border border-gray-600 focus:outline-none focus:border-blue-500 w-28 placeholder-gray-500 uppercase font-mono"
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter') {
@@ -415,7 +432,15 @@ export default function StockDetailPage() {
                     {/* Changes (Grouped) */}
                     {/* Changes (Grouped) */}
                     <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-1" title="1D Change">
+                        <div className="flex items-center gap-1" title="時価総額">
+                            <span className="text-gray-500 text-sm">MC:</span>
+                            <span className="font-mono text-sm text-gray-300">
+                                {stock.market_cap ? `${(Number(stock.market_cap) / 1e9).toFixed(2)}B` : '-'}
+                            </span>
+                        </div>
+                        <div className="hidden md:block w-px h-3 bg-gray-600"></div>
+
+                        <div className="flex items-center gap-1" title="前日比">
                             <span className="text-gray-500 text-sm">前日比:</span>
                             <span className={`font-mono text-sm ${(stock.change_percentage_1d || 0) > 0 ? 'text-red-400' : (stock.change_percentage_1d || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
                                 {stock.change_percentage_1d ? `${stock.change_percentage_1d > 0 ? '+' : ''}${stock.change_percentage_1d.toFixed(1)}%` : '-'}
@@ -445,7 +470,7 @@ export default function StockDetailPage() {
                                 {stock.change_percentage_200d ? `${stock.change_percentage_200d > 0 ? '+' : ''}${stock.change_percentage_200d.toFixed(1)}%` : '-'}
                             </span>
                         </div>
-                        <div className="flex items-center gap-1" title="ATR (14 days)">
+                        <div className="flex items-center gap-1" title="ATR (14日)">
                             <span className="text-gray-500 text-sm">ATR(14):</span>
                             <span className="font-mono text-gray-300 text-sm">
                                 {stock.atr_14 ? (
@@ -464,25 +489,25 @@ export default function StockDetailPage() {
 
                     {/* SMA Deviations */}
                     <div className="flex items-center gap-4 border-l border-gray-600 pl-4 sm:ml-4 mt-2 sm:mt-0">
-                        <div className="flex items-center gap-1" title="Deviation from 5-day SMA">
+                        <div className="flex items-center gap-1" title="乖離率 (5日)">
                             <span className="text-gray-500 font-mono text-sm">{t('dev5')}:</span>
                             <span className={`font-mono text-sm ${(stock.deviation_5ma_pct || 0) > 0 ? 'text-red-400' : (stock.deviation_5ma_pct || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
                                 {stock.deviation_5ma_pct ? `${stock.deviation_5ma_pct > 0 ? '+' : ''}${stock.deviation_5ma_pct.toFixed(2)}%` : '-'}
                             </span>
                         </div>
-                        <div className="flex items-center gap-1" title="Deviation from 20-day SMA">
+                        <div className="flex items-center gap-1" title="乖離率 (20日)">
                             <span className="text-gray-500 font-mono text-sm">{t('dev20')}:</span>
                             <span className={`font-mono text-sm ${(stock.deviation_20ma_pct || 0) > 0 ? 'text-red-400' : (stock.deviation_20ma_pct || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
                                 {stock.deviation_20ma_pct ? `${stock.deviation_20ma_pct > 0 ? '+' : ''}${stock.deviation_20ma_pct.toFixed(2)}%` : '-'}
                             </span>
                         </div>
-                        <div className="flex items-center gap-1" title="Deviation from 50-day SMA">
+                        <div className="flex items-center gap-1" title="乖離率 (50日)">
                             <span className="text-gray-500 font-mono text-sm">{t('dev50')}:</span>
                             <span className={`font-mono text-sm ${(stock.deviation_50ma_pct || 0) > 0 ? 'text-red-400' : (stock.deviation_50ma_pct || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
                                 {stock.deviation_50ma_pct ? `${stock.deviation_50ma_pct > 0 ? '+' : ''}${stock.deviation_50ma_pct.toFixed(2)}%` : '-'}
                             </span>
                         </div>
-                        <div className="flex items-center gap-1" title="Deviation from 200-day SMA">
+                        <div className="flex items-center gap-1" title="乖離率 (200日)">
                             <span className="text-gray-500 font-mono text-sm">{t('dev200')}:</span>
                             <span className={`font-mono text-sm ${(stock.deviation_200ma_pct || 0) > 0 ? 'text-red-400' : (stock.deviation_200ma_pct || 0) < 0 ? 'text-blue-400' : 'text-gray-400'}`}>
                                 {stock.deviation_200ma_pct ? `${stock.deviation_200ma_pct > 0 ? '+' : ''}${stock.deviation_200ma_pct.toFixed(2)}%` : '-'}
@@ -505,7 +530,7 @@ export default function StockDetailPage() {
                             <div className="flex justify-between items-center mb-4">
                                 <h2 className="text-xl font-bold text-gray-300">{t('priceChart')} ({t('dailyChart')})</h2>
                                 <div className="flex items-center gap-2">
-                                    <span className={`text-xs ${logScale ? 'text-blue-400 font-bold' : 'text-gray-500'}`}>Log</span>
+                                    <span className={`text-xs ${logScale ? 'text-blue-400 font-bold' : 'text-gray-500'}`}>対数</span>
                                     <button
                                         onClick={() => setLogScale(!logScale)}
                                         className={`w-10 h-5 flex items-center bg-gray-700 rounded-full p-1 duration-300 ease-in-out ${logScale ? 'bg-blue-600' : ''}`}
@@ -768,6 +793,12 @@ export default function StockDetailPage() {
                     </div>
                 </div>
             </div>
+            {/* Content Grid */}
+            <TradingDialog
+                isOpen={isTradingOpen}
+                onClose={() => setIsTradingOpen(false)}
+                initialSymbol={stock.symbol}
+            />
         </main >
     );
 }

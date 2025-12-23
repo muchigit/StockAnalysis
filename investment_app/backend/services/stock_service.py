@@ -42,6 +42,55 @@ class StockService:
             logger.error(f"Error getting info for {symbol}: {e}")
             return None
 
+    def fetch_fundamentals(self, symbol):
+        """
+        Fetch fundamental data: Market Cap, Earnings Dates.
+        Returns dict with keys: market_cap, last_earnings_date, next_earnings_date
+        """
+        try:
+            ticker_symbol = symbol
+            if symbol.isdigit() and len(symbol) == 4:
+                ticker_symbol = f"{symbol}.T"
+            
+            ticker = yf.Ticker(ticker_symbol)
+            info = ticker.info
+            
+            # Market Cap
+            market_cap = info.get('marketCap')
+            
+            # Earnings
+            # yfinance often provides 'calendar' or 'earnings_dates'
+            # 'calendar' returns a dict or dataframe with next earnings date
+            next_earnings = None
+            try:
+                calendar = ticker.calendar
+                # calendar is usually a dict {0: [date], 'Earnings Date': [date], ...} or DataFrame
+                if isinstance(calendar, dict):
+                    # Try to find 'Earnings Date' or 0
+                    if 'Earnings Date' in calendar:
+                        dates = calendar['Earnings Date']
+                        if dates and len(dates) > 0:
+                            next_earnings = dates[0]
+                    elif 0 in calendar:
+                         dates = calendar[0]
+                         if dates and len(dates) > 0:
+                            next_earnings = dates[0]
+            except Exception as e:
+                logger.warning(f"Error fetching calendar for {symbol}: {e}")
+
+            return {
+                "market_cap": market_cap,
+                "next_earnings_date": next_earnings,
+                # last_earnings_date is harder to get reliably without full history analysis or specific field
+                # Sometimes in info['earningsTimestamp']?
+                # For now, let's rely on info or skip last_earnings if not available easily.
+                # info might have 'mostRecentQuarter' (timestamp)
+                "last_earnings_date": pd.to_datetime(info.get('mostRecentQuarter'), unit='s') if info.get('mostRecentQuarter') else None
+            }
+        except Exception as e:
+            logger.error(f"Error fetching fundamentals for {symbol}: {e}")
+            return {}
+
     def get_stock_data(self, symbol, period="2y", interval="1d", force_refresh=False):
         """
         Get stock data, using cache if available and up-to-date.

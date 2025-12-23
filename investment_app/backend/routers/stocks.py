@@ -26,6 +26,8 @@ class StockResponse(Stock):
     last_buy_date: Optional[str] = None
     last_sell_date: Optional[str] = None
     realized_pl: Optional[float] = 0.0
+    unrealized_pl: Optional[float] = 0.0
+    average_cost: Optional[float] = 0.0
     note: Optional[str] = None
     latest_analysis: Optional[str] = None
 
@@ -83,16 +85,23 @@ def list_stocks(offset: int = 0, limit: int = 2000, asset_type: str = "stock", s
     stock_analytics = _calculate_stats(trades)
 
     response = []
-
-    response = []
     for s in stocks:
         stats = stock_analytics.get(s.symbol, {
-            'qty': 0.0, 'cnt': 0, 'last_buy': None, 'last_sell': None, 'realized_pl': 0.0
+            'qty': 0.0, 'cnt': 0, 'last_buy': None, 'last_sell': None, 'realized_pl': 0.0, 'total_cost': 0.0
         })
         
         qty = stats['qty']
         cnt = stats['cnt']
         
+        # Calculate Unrealized P&L
+        avg_cost = 0.0
+        unrealized_pl = 0.0
+        if qty > 0.0001:
+            avg_cost = stats.get('total_cost', 0) / qty
+            current_price = s.current_price or 0
+            if current_price > 0:
+                unrealized_pl = (current_price - avg_cost) * qty
+
         status = "None"
         if qty > 0.0001:
             status = "Holding"
@@ -107,6 +116,8 @@ def list_stocks(offset: int = 0, limit: int = 2000, asset_type: str = "stock", s
             last_buy_date=stats['last_buy'],
             last_sell_date=stats['last_sell'],
             realized_pl=stats['realized_pl'],
+            unrealized_pl=unrealized_pl,
+            average_cost=avg_cost,
             note=notes_map.get(s.symbol),
             latest_analysis=analysis_map.get(s.symbol)
         )
