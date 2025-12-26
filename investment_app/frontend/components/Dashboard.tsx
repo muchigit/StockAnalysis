@@ -730,6 +730,7 @@ export default function Dashboard({ showHiddenOnly = false }: DashboardProps) {
         // Use filtered stocks as targets
         const targets = filteredStocks;
 
+        setShowBatchDialog(false); // Close dialog immediately
         abortBatchRef.current = false;
         setBatchProgress({ current: 0, total: targets.length, status: 'running', message: 'Starting...', detail: '' });
 
@@ -752,7 +753,18 @@ export default function Dashboard({ showHiddenOnly = false }: DashboardProps) {
             });
 
             try {
-                const prompt = promptTemplate.replace('%COMPANYNAME%', stock.company_name || stock.symbol);
+                const stockData = `
+Price: ${stock.current_price}
+CR: ${stock.composite_rating} / RS: ${stock.rs_rating}
+Sector: ${stock.sector} / Industry: ${stock.industry}
+Market Cap: ${stock.market_cap}
+`.trim();
+                const today = new Date().toISOString().split('T')[0];
+                const prompt = promptTemplate
+                    .replace(/%COMPANYNAME%/g, stock.company_name || stock.symbol)
+                    .replace(/%SYMBOL%/g, stock.symbol)
+                    .replace(/%DATE%/g, today)
+                    .replace(/%STOCKDATA%/g, stockData);
                 const text = await generateText(prompt);
                 if (text) {
                     await saveStockNote(stock.symbol, text);
@@ -1172,10 +1184,27 @@ export default function Dashboard({ showHiddenOnly = false }: DashboardProps) {
                 </h1>
                 <div className="flex items-center gap-4">
                     {/* Activity Indicator */}
+                    {/* Activity Indicator */}
                     {isBackgroundActive && (
-                        <div className="flex items-center gap-2 px-3 py-1 bg-gray-900 rounded-full border border-blue-900/50 animate-pulse">
-                            <div className="w-2 h-2 bg-blue-500 rounded-full animate-spin"></div>
-                            <span className="text-xs text-blue-400 font-mono">処理中...</span>
+                        <div className="flex items-center gap-3 px-4 py-1.5 bg-gray-900 rounded-full border border-blue-900/50 shadow-lg animate-in fade-in slide-in-from-top-4 duration-300">
+                            <div className="relative">
+                                <div className="w-3 h-3 bg-blue-500 rounded-full animate-spin"></div>
+                                <div className="absolute inset-0 bg-blue-400 rounded-full animate-ping opacity-75"></div>
+                            </div>
+                            <div className="flex flex-col">
+                                <span className="text-xs font-bold text-blue-300">
+                                    {batchProgress?.status === 'running'
+                                        ? `一括生成中 (${batchProgress.current}/${batchProgress.total})`
+                                        : importStatus === 'loading'
+                                            ? 'データ取込中...'
+                                            : '処理中...'}
+                                </span>
+                                {batchProgress?.status === 'running' && batchProgress.detail && (
+                                    <span className="text-[10px] text-gray-400 max-w-[150px] truncate">
+                                        {batchProgress.detail}
+                                    </span>
+                                )}
+                            </div>
                         </div>
                     )}
 

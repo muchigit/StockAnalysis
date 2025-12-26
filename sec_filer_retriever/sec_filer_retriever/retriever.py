@@ -4,9 +4,12 @@ from sec_cik_mapper import StockMapper # Use StockMapper
 import json # Import for json.JSONDecodeError
 from datetime import datetime, date # Added for date operations
 
+_SEC_TICKER_CACHE = {}
+
 def get_cik(ticker_symbol: str) -> str | None:
     """
     Converts a ticker symbol to a 10-digit CIK string.
+    First tries sec-cik-mapper, then falls back to fetching ticker.txt from SEC.
 
     Args:
         ticker_symbol: The stock ticker symbol.
@@ -16,23 +19,41 @@ def get_cik(ticker_symbol: str) -> str | None:
     """
     if not isinstance(ticker_symbol, str) or not ticker_symbol:
         return None
+    
+    # 1. Try sec-cik-mapper
     try:
-        mapper = StockMapper() # Use StockMapper
-        # The mapper expects a dictionary {custom_key: ticker}
-        # and returns a dictionary {custom_key: CIK}
+        mapper = StockMapper()
         cik_map = mapper.ticker_to_cik({ticker_symbol: ticker_symbol})
         
-        if not cik_map or ticker_symbol not in cik_map:
-            return None
-            
-        cik_value = cik_map[ticker_symbol]
-        
-        # Ensure CIK is a string and then format to 10 digits, zero-padded
-        return str(cik_value).zfill(10)
-        
+        if cik_map and ticker_symbol in cik_map:
+            return str(cik_map[ticker_symbol]).zfill(10)
     except Exception:
-        # Catch any other unexpected errors during the mapping process
-        return None
+        pass
+
+    # 2. Fallback: Fetch from SEC ticker.txt directly
+    # This handles recent IPOs or tickers missing from the mapper's cache
+    global _SEC_TICKER_CACHE
+    if not _SEC_TICKER_CACHE:
+        try:
+            url = "https://www.sec.gov/include/ticker.txt"
+            headers = {"User-Agent": "admin@example.com"} # Generic UA for public list
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                for line in resp.text.splitlines():
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        sym = parts[0].upper() # ticker.txt is lowercase
+                        cik = parts[1]
+                        _SEC_TICKER_CACHE[sym] = cik
+        except Exception:
+            return None
+
+    # Check cache
+    normalized_ticker = ticker_symbol.upper()
+    if normalized_ticker in _SEC_TICKER_CACHE:
+        return str(_SEC_TICKER_CACHE[normalized_ticker]).zfill(10)
+
+    return None
 
 def get_sec_data(cik_code: str, user_agent_email: str) -> dict | None:
     """
@@ -120,7 +141,7 @@ def get_latest_filing_date(sec_data: dict, target_date_str: str, form_types: lis
             current_filing_date_obj = datetime.strptime(current_filing_date_str, "%Y-%m-%d").date()
         except ValueError:
             continue # Skip this filing if its date is malformed
-
+        
         if current_filing_form in form_types and current_filing_date_obj <= target_date:
             if latest_found_date_obj is None or current_filing_date_obj > latest_found_date_obj:
                 latest_found_date_obj = current_filing_date_obj

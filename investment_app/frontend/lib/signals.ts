@@ -14,5 +14,5 @@ export const SIGNAL_LABELS: Record<string, string> = {
     signal_break_atr: 'ATRブレイク',
     signal_high_slope5ma: '5MA 急上昇',
     signal_rebound_5ma: 'リバウンド 5MA',
-    signal_base_formation: 'Base Formation',
+    signal_base_formation: 'ベース形成',
 };

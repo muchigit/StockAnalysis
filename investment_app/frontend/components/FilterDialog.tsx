@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from '@/lib/i18n';
-import { saveFilter } from '@/lib/api';
 import { SIGNAL_LABELS } from '@/lib/signals';
 
 export interface FilterCriteria {
@@ -54,6 +54,11 @@ export function isCriteriaActive(c: FilterCriteria): boolean {
 export default function FilterDialog({ isOpen, onClose, onApply, onSaved, initialCriteria }: FilterDialogProps) {
     const { t } = useTranslation();
     const [criteria, setCriteria] = useState<FilterCriteria>(initialCriteria || {});
+    const [mounted, setMounted] = useState(false);
+
+    useEffect(() => {
+        setMounted(true);
+    }, []);
 
     useEffect(() => {
         if (isOpen && initialCriteria) {
@@ -78,11 +83,14 @@ export default function FilterDialog({ isOpen, onClose, onApply, onSaved, initia
         setCriteria({});
     };
 
-    if (!isOpen) return null;
+    if (!isOpen || !mounted) return null;
 
-    return (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
-            <div className="bg-gray-800 p-6 rounded-lg w-full max-w-lg border border-gray-700 shadow-xl">
+    const modalContent = (
+        <div className="fixed inset-0 bg-black/50 z-[100000] flex items-center justify-center p-4" onClick={onClose}>
+            <div
+                className="bg-gray-800 p-6 rounded-lg w-full max-w-lg border border-gray-700 shadow-xl max-h-[90vh] overflow-y-auto"
+                onClick={e => e.stopPropagation()}
+            >
                 <h2 className="text-xl font-bold mb-4 text-white">詳細フィルタ</h2>
 
                 <div className="space-y-4 mb-6">
@@ -170,12 +178,8 @@ export default function FilterDialog({ isOpen, onClose, onApply, onSaved, initia
                     </div>
                 </div>
 
-                {/* Save Section Removed */}
-                <div className="border-t border-gray-700 pt-4 mb-6">
-                </div>
-
                 {/* Actions */}
-                <div className="flex justify-between items-center">
+                <div className="border-t border-gray-700 pt-4 flex justify-between items-center">
                     <button
                         onClick={handleClear}
                         className="px-4 py-2 text-red-500 hover:text-red-400 font-bold text-sm border border-red-900/30 rounded bg-red-900/10 hover:bg-red-900/20"
@@ -195,4 +199,7 @@ export default function FilterDialog({ isOpen, onClose, onApply, onSaved, initia
             </div>
         </div>
     );
+
+    return createPortal(modalContent, document.body);
 }
+
