@@ -43,6 +43,10 @@ from .routers import views
 app.include_router(views.router)
 from .routers import analytics
 app.include_router(analytics.router)
+from .routers import groups
+app.include_router(groups.router)
+from .routers import calendar
+app.include_router(calendar.router)
 # from .routers import automation_router_v2
 # app.include_router(automation_router_v2.router)
 

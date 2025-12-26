@@ -34,6 +34,7 @@ export default function HeaderFilter({ columnKey, dataType, uniqueValues, curren
     const [tempEndDate, setTempEndDate] = useState<string>(currentFilter?.endDate || '');
     const tempTextRef = useRef<string>(currentFilter?.text || '');
     const [searchTerm, setSearchTerm] = useState('');
+    const isComposing = useRef(false);
 
     const [position, setPosition] = useState({ top: 0, left: 0 });
 
@@ -226,9 +227,11 @@ export default function HeaderFilter({ columnKey, dataType, uniqueValues, curren
                             className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-blue-500"
                             placeholder="検索..."
                             autoFocus
+                            onCompositionStart={() => { isComposing.current = true; }}
+                            onCompositionEnd={() => { isComposing.current = false; }}
                             onKeyDown={(e) => {
                                 e.stopPropagation();
-                                if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                if (e.key === 'Enter' && !isComposing.current && !e.nativeEvent.isComposing) {
                                     handleApply();
                                 }
                             }}

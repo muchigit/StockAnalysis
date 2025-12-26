@@ -15,9 +15,12 @@ router = APIRouter(
 
 @router.get("/", response_model=List[StockAlert])
 def list_alerts(
+    symbol: Optional[str] = Query(None, description="Filter by symbol"),
     session: Session = Depends(get_session)
 ):
-    """List all alerts"""
+    """List all alerts, optionally filtered by symbol"""
+    if symbol:
+        return session.exec(select(StockAlert).where(StockAlert.symbol == symbol.upper())).all()
     return session.exec(select(StockAlert)).all()
 
 @router.post("/", response_model=StockAlert)

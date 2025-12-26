@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { fetchStockDetail, fetchStockChart, fetchStockSignals, fetchStockHistory, fetchStockNote, saveStockNote, fetchStockAnalysis, deleteStock, Stock, ChartData, TradeHistory, StockNote, AnalysisResult, updateStock, fetchPrompts, fetchStockPriceHistory, GeminiPrompt, openFile, generateText, updateTradeNote, pickFile, AlertCondition } from '@/lib/api';
+import { fetchStockDetail, fetchStockChart, fetchStockSignals, fetchStockHistory, fetchStockNote, saveStockNote, fetchStockAnalysis, deleteStock, Stock, ChartData, TradeHistory, StockNote, AnalysisResult, updateStock, fetchPrompts, fetchStockPriceHistory, GeminiPrompt, openFile, generateText, updateTradeNote, pickFile, AlertCondition, triggerVisualAnalysis, deleteAnalysisResult } from '@/lib/api';
 import { addResearchTicker } from '@/lib/research-storage';
 import { SIGNAL_LABELS } from '@/lib/signals';
 import { StockChart } from '@/components/StockChart';
@@ -221,6 +221,26 @@ export default function StockDetailPage() {
         } catch (e) {
             console.error(e);
             alert("更新に失敗しました: " + e);
+        } finally {
+            setRefreshingAnalysis(false);
+        }
+    }
+
+    async function handleVisualAnalysis() {
+        if (!stock) return;
+        if (!confirm("チャート画像分析を実行しますか？\n(Beta: Gemini Pro Visionを使用)")) return;
+
+        setRefreshingAnalysis(true);
+        setToastMsg("画像分析を実行中... (チャートの生成とアップロードを行っています)");
+        try {
+            await triggerVisualAnalysis(stock.symbol);
+            setToastMsg("分析が完了しました");
+            // Reload analysis list
+            const a = await fetchStockAnalysis(stock.symbol);
+            setAnalysis(a);
+        } catch (e) {
+            console.error(e);
+            alert("分析に失敗しました: " + e);
         } finally {
             setRefreshingAnalysis(false);
         }
@@ -704,10 +724,10 @@ export default function StockDetailPage() {
 
 
 
-                    {/* Main Content Grid - Responsive 2/1 columns on LG, 3-column effect on 2XL */}
+                    {/* Content Grid */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 w-full max-w-full">
-                        {/* Charts Column - Stacks vertically on LG, splits to 2 columns on 2XL */}
-                        <div className="lg:col-span-2 space-y-8 2xl:space-y-0 2xl:grid 2xl:grid-cols-2 2xl:gap-8">
+                        {/* Charts Column - Stacks vertically but takes 2/3 width */}
+                        <div className="lg:col-span-2 space-y-8">
                             {/* Daily Chart */}
                             <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
                                 <div className="flex justify-between items-center mb-4">
@@ -837,6 +857,14 @@ export default function StockDetailPage() {
                                                 <h2 className="text-xl font-bold text-gray-300">AI生成レポート分析</h2>
                                                 <div className="flex gap-2">
                                                     <button
+                                                        onClick={handleVisualAnalysis}
+                                                        disabled={refreshingAnalysis}
+                                                        className="text-xs px-2 py-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 rounded text-white font-bold transition flex items-center gap-1 shadow-lg border border-purple-500/50"
+                                                        title="Backendでチャート画像を生成しGemini Pro Visionで分析します"
+                                                    >
+                                                        👁️ Pro Vision分析
+                                                    </button>
+                                                    <button
                                                         onClick={async () => {
                                                             const path = await pickFile();
                                                             if (path) {
@@ -898,23 +926,43 @@ export default function StockDetailPage() {
                                             {analysis.length > 0 ? (
                                                 <div className="space-y-4 max-h-[300px] overflow-y-auto">
                                                     {analysis.map((a) => (
-                                                        <div key={a.id} className="p-4 bg-gray-900 rounded border border-gray-700">
+                                                        <div key={a.id} className="p-4 bg-gray-900 rounded border border-gray-700 relative group">
                                                             <div className="flex justify-between items-start mb-2">
                                                                 <div className="text-xs text-gray-500">{new Date(a.created_at).toLocaleString()}</div>
-                                                                {a.file_path && (
-                                                                    <button
-                                                                        onClick={async () => {
-                                                                            try {
-                                                                                await openFile(a.file_path!);
-                                                                            } catch (e) {
-                                                                                alert(t('failedToOpenFile') + ": " + e);
-                                                                            }
-                                                                        }}
-                                                                        className="text-xs bg-blue-900 text-blue-300 px-2 py-1 rounded hover:bg-blue-800 transition border border-blue-800"
-                                                                    >
-                                                                        Google Docを開く 📄
-                                                                    </button>
-                                                                )}
+                                                                <div className="flex gap-2">
+                                                                    {a.file_path && (
+                                                                        <button
+                                                                            onClick={async () => {
+                                                                                try {
+                                                                                    await openFile(a.file_path!);
+                                                                                } catch (e) {
+                                                                                    alert(t('failedToOpenFile') + ": " + e);
+                                                                                }
+                                                                            }}
+                                                                            className="text-xs bg-blue-900 text-blue-300 px-2 py-1 rounded hover:bg-blue-800 transition border border-blue-800"
+                                                                        >
+                                                                            Google Docを開く 📄
+                                                                        </button>
+                                                                    )}
+                                                                    {/* Delete Button (Only for DB results with positive ID) */}
+                                                                    {a.id && a.id > 0 && (
+                                                                        <button
+                                                                            onClick={async () => {
+                                                                                if (!confirm("この分析結果を削除しますか？")) return;
+                                                                                try {
+                                                                                    await deleteAnalysisResult(stock.symbol, a.id);
+                                                                                    setAnalysis(analysis.filter(item => item.id !== a.id));
+                                                                                } catch (e) {
+                                                                                    alert("Delete Failed: " + e);
+                                                                                }
+                                                                            }}
+                                                                            className="text-xs bg-red-900/50 text-red-300 px-2 py-1 rounded hover:bg-red-800 transition border border-red-800 opacity-0 group-hover:opacity-100"
+                                                                            title="削除"
+                                                                        >
+                                                                            🗑️
+                                                                        </button>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                             <div className="prose prose-invert prose-sm">
                                                                 {/* In real app, render full markdown. For now just text. */}

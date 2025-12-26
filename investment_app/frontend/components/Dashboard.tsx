@@ -14,6 +14,8 @@ import HeaderFilter, { ColumnFilterValue } from '@/components/HeaderFilter';
 import SystemStatusBanner from '@/components/SystemStatusBanner';
 import MiniCandleChart from '@/components/MiniCandleChart';
 import SortIcon from '@/components/SortIcon';
+import AddToGroupDialog from '@/components/AddToGroupDialog';
+import { fetchGroups, fetchGroupMembers, StockGroup } from '@/lib/api';
 
 import AlertDialog from '@/components/AlertDialog';
 import { fetchAlerts, checkAlerts, StockAlert, AlertCondition } from '@/lib/api';
@@ -141,6 +143,13 @@ export default function Dashboard({ showHiddenOnly = false }: DashboardProps) {
         activeTabRef.current = activeTab;
         loadStocks();
     }, [activeTab]);
+
+    // Groups State
+    const [groups, setGroups] = useState<StockGroup[]>([]);
+    const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
+    const [groupMemberSymbols, setGroupMemberSymbols] = useState<Set<string>>(new Set());
+    const [isAddToGroupDialogOpen, setIsAddToGroupDialogOpen] = useState(false);
+    const [addToGroupSymbol, setAddToGroupSymbol] = useState('');
 
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
@@ -435,6 +444,22 @@ export default function Dashboard({ showHiddenOnly = false }: DashboardProps) {
         router.replace(`${pathname}?${queryString}`);
     };
 
+    // Load Groups
+    useEffect(() => {
+        fetchGroups().then(setGroups).catch(console.error);
+    }, []);
+
+    // Load Group Members when selected
+    useEffect(() => {
+        if (selectedGroupId) {
+            fetchGroupMembers(selectedGroupId).then(stocks => {
+                setGroupMemberSymbols(new Set(stocks.map(s => s.symbol)));
+            }).catch(console.error);
+        } else {
+            setGroupMemberSymbols(new Set());
+        }
+    }, [selectedGroupId]);
+
     const handleRefresh = () => {
         loadStocks();
         refreshAlerts();
@@ -607,6 +632,11 @@ export default function Dashboard({ showHiddenOnly = false }: DashboardProps) {
                 if (!(stock.is_buy_candidate === true)) return false;
             }
 
+            // Group Filter
+            if (selectedGroupId && !groupMemberSymbols.has(stock.symbol)) {
+                return false;
+            }
+
             // 4. Advanced Filters
             if (activeCriteria) {
                 if (activeCriteria.status && activeCriteria.status !== 'None' && stock.status !== activeCriteria.status) return false;
@@ -752,28 +782,52 @@ export default function Dashboard({ showHiddenOnly = false }: DashboardProps) {
                 detail: stock.company_name
             });
 
-            try {
-                const stockData = `
+            let retries = 0;
+            const MAX_RETRIES = 3;
+            let success = false;
+
+            while (retries < MAX_RETRIES && !success) {
+                if (abortBatchRef.current) break;
+                try {
+                    const stockData = `
 Price: ${stock.current_price}
 CR: ${stock.composite_rating} / RS: ${stock.rs_rating}
 Sector: ${stock.sector} / Industry: ${stock.industry}
 Market Cap: ${stock.market_cap}
 `.trim();
-                const today = new Date().toISOString().split('T')[0];
-                const prompt = promptTemplate
-                    .replace(/%COMPANYNAME%/g, stock.company_name || stock.symbol)
-                    .replace(/%SYMBOL%/g, stock.symbol)
-                    .replace(/%DATE%/g, today)
-                    .replace(/%STOCKDATA%/g, stockData);
-                const text = await generateText(prompt);
-                if (text) {
-                    await saveStockNote(stock.symbol, text);
-                    setStocks(prev => prev.map(s => s.symbol === stock.symbol ? { ...s, note: text } : s));
-                    successCount++;
+                    const today = new Date().toISOString().split('T')[0];
+                    const prompt = promptTemplate
+                        .replace(/%COMPANYNAME%/g, stock.company_name || stock.symbol)
+                        .replace(/%SYMBOL%/g, stock.symbol)
+                        .replace(/%DATE%/g, today)
+                        .replace(/%STOCKDATA%/g, stockData);
+
+                    const text = await generateText(prompt);
+
+                    // Validation: Check for Error string
+                    if (!text || text.trim().startsWith("Error") || text.includes("Error uploading image")) {
+                        throw new Error("Generated text indicates error: " + text.slice(0, 50));
+                    }
+
+                    if (text) {
+                        await saveStockNote(stock.symbol, text);
+                        setStocks(prev => prev.map(s => s.symbol === stock.symbol ? { ...s, note: text } : s));
+                        successCount++;
+                        success = true;
+                    }
+                } catch (e) {
+                    console.error(`Failed to generate for ${stock.symbol} (Attempt ${retries + 1})`, e);
+                    retries++;
+                    if (retries < MAX_RETRIES) {
+                        setBatchProgress(prev => ({
+                            ...prev,
+                            detail: `${stock.company_name} (Retry ${retries}/${MAX_RETRIES})`
+                        }));
+                        await new Promise(r => setTimeout(r, 5000)); // Wait 5s before retry
+                    } else {
+                        failCount++;
+                    }
                 }
-            } catch (e) {
-                console.error(`Failed to generate for ${stock.symbol}`, e);
-                failCount++;
             }
 
             // Small delay
@@ -826,7 +880,7 @@ Market Cap: ${stock.market_cap}
                                 console.error("Failed to update buy mark", error);
                             }
                         }}
-                        className={`text-lg focus:outline-none transition-colors ${stock.is_buy_candidate ? 'text-yellow-400 drop-shadow-md' : 'text-gray-700 hover:text-gray-500'}`}
+                        className={`text-lg focus:outline-none transition-colors ${stock.is_buy_candidate ? 'text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.8)]' : 'text-gray-700 hover:text-gray-500'}`}
                         title={stock.is_buy_candidate ? "Remove Buy Candidate" : "Mark as Buy Candidate"}
                     >
                         {stock.is_buy_candidate ? '★' : '☆'}
@@ -877,6 +931,17 @@ Market Cap: ${stock.market_cap}
                             >
                                 <span className="text-[10px] bg-blue-600 text-white px-1 py-0.5 rounded font-bold">T</span>
                             </a>
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setAddToGroupSymbol(stock.symbol);
+                                    setIsAddToGroupDialogOpen(true);
+                                }}
+                                className="opacity-50 hover:opacity-100 transition"
+                                title="Add to Group"
+                            >
+                                <span className="text-lg leading-none">📁</span>
+                            </button>
                             {/* Add to Research Icon (Restored) */}
                             <button
                                 onClick={(e) => {
@@ -1239,6 +1304,12 @@ Market Cap: ${stock.market_cap}
                             <div className="absolute right-0 top-full mt-2 w-56 bg-gray-800 border border-gray-700 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-top-right">
                                 <div className="p-2 space-y-1">
                                     <button
+                                        onClick={() => { setIsMenuOpen(false); router.push('/calendar'); }}
+                                        className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-sm text-gray-200 flex items-center gap-2 transition"
+                                    >
+                                        <span>📅</span> Earnings Calendar
+                                    </button>
+                                    <button
                                         onClick={() => { setIsMenuOpen(false); handleRefresh(); }}
                                         className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-sm text-gray-200 flex items-center gap-2 transition"
                                     >
@@ -1269,6 +1340,12 @@ Market Cap: ${stock.market_cap}
                                         className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-sm text-gray-200 flex items-center gap-2 transition"
                                     >
                                         <span>🧠</span> ディープリサーチ
+                                    </button>
+                                    <button
+                                        onClick={() => { setIsMenuOpen(false); router.push('/heatmap'); }}
+                                        className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-sm text-gray-200 flex items-center gap-2 transition"
+                                    >
+                                        <span>🗺️</span> セクターマップ
                                     </button>
                                     <button
                                         onClick={() => { setIsMenuOpen(false); router.push('/historical-analysis'); }}
@@ -1368,7 +1445,6 @@ Market Cap: ${stock.market_cap}
                         >
                             {t('pastTrade')}
                         </button>
-                        {/* Star Filter */}
                         <button
                             onClick={() => handleFilterChange('star')}
                             className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-1 ${filterMode === 'star'
@@ -1378,6 +1454,23 @@ Market Cap: ${stock.market_cap}
                         >
                             <span>★</span>
                         </button>
+                    </div>
+
+                    <div className="h-8 w-px bg-gray-700 mx-2"></div>
+
+                    {/* Group Filter */}
+                    <div className="relative">
+                        <select
+                            value={selectedGroupId || ""}
+                            onChange={(e) => setSelectedGroupId(e.target.value ? Number(e.target.value) : null)}
+                            className="bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 pr-8 focus:outline-none focus:border-blue-500 appearance-none min-w-[120px]"
+                        >
+                            <option value="">All Groups</option>
+                            {groups.map(g => (
+                                <option key={g.id} value={g.id}>{g.name}</option>
+                            ))}
+                        </select>
+                        <span className="absolute right-3 top-2.5 text-gray-500 pointer-events-none">▼</span>
                     </div>
 
                     {/* Filter List & Advanced Filter */}
@@ -1558,6 +1651,13 @@ Market Cap: ${stock.market_cap}
                 onClose={() => setIsTradingOpen(false)}
                 initialSymbol={tradingSymbol}
             />
+
+            <AddToGroupDialog
+                symbol={addToGroupSymbol}
+                isOpen={isAddToGroupDialogOpen}
+                onClose={() => setIsAddToGroupDialogOpen(false)}
+            />
+
             {/* Batch Gemini Dialog */}
             {
                 showBatchDialog && (

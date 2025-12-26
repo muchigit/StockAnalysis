@@ -187,3 +187,16 @@ class TableViewConfig(SQLModel, table=True):
     columns_json: str # JSON list of column keys
     is_default: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class StockGroup(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True)
+    description: Optional[str] = None
+    group_type: str = Field(default="watchlist") # watchlist, portfolio
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class StockGroupMember(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    group_id: int = Field(foreign_key="stockgroup.id")
+    symbol: str = Field(index=True)
+    added_at: datetime = Field(default_factory=datetime.utcnow)

@@ -88,6 +88,77 @@ export interface Stock {
   asset_type?: string;
 }
 
+// --- Group API ---
+
+export interface StockGroup {
+  id: number;
+  name: string;
+  description?: string;
+  group_type: 'watchlist' | 'portfolio';
+  created_at: string;
+}
+
+export interface StockGroupMember {
+  id: number;
+  group_id: number;
+  symbol: string;
+  added_at: string;
+}
+
+
+
+export async function fetchGroups(): Promise<StockGroup[]> {
+  const res = await fetch(`${API_URL}/groups/`);
+  if (!res.ok) throw new Error('Failed to fetch groups');
+  return res.json();
+}
+
+export async function createGroup(name: string, description?: string, group_type: string = 'watchlist'): Promise<StockGroup> {
+  const res = await fetch(`${API_URL}/groups/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description, group_type })
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || 'Failed to create group');
+  }
+  return res.json();
+}
+
+export async function deleteGroup(id: number): Promise<void> {
+  const res = await fetch(`${API_URL}/groups/${id}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete group');
+}
+
+export async function fetchGroupMembers(groupId: number): Promise<Stock[]> {
+  const res = await fetch(`${API_URL}/groups/${groupId}/members`);
+  if (!res.ok) throw new Error('Failed to fetch group members');
+  return res.json();
+}
+
+export async function addGroupMember(groupId: number, symbol: string): Promise<StockGroupMember> {
+  const res = await fetch(`${API_URL}/groups/${groupId}/members?symbol=${symbol}&group_id=${groupId}`, {
+    method: 'POST'
+  });
+  // Note: The POST endpoint in python was defined as (group_id, symbol) query params by default if not body.
+  // Let's check router: def add_member(group_id: int, symbol: str, ...)
+  // FastAPI defaults to query params for scalars.
+  if (!res.ok) throw new Error('Failed to add member to group');
+  return res.json();
+}
+
+export async function removeGroupMember(groupId: number, symbol: string): Promise<void> {
+  const res = await fetch(`${API_URL}/groups/${groupId}/members/${symbol}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to remove member from group');
+}
+
+export async function fetchEarningsCalendar(startDate: string, endDate: string): Promise<any[]> {
+  const res = await fetch(`${API_URL}/calendar/earnings?start_date=${startDate}&end_date=${endDate}`);
+  if (!res.ok) throw new Error('Failed to fetch earnings calendar');
+  return res.json();
+}
+
 // --- Trading API ---
 
 export interface TradingUnlockRequest {
@@ -257,13 +328,33 @@ export async function saveStockNote(symbol: string, content: string): Promise<St
   return res.json();
 }
 
+export async function triggerVisualAnalysis(symbol: string): Promise<void> {
+  const res = await fetch(`${API_URL}/stocks/${symbol}/analysis/visual`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Failed to trigger visual analysis');
+  }
+}
+
 export async function fetchStockAnalysis(symbol: string): Promise<AnalysisResult[]> {
   const res = await fetch(`${API_URL}/stocks/${symbol}/analysis`);
   return res.json();
 }
 
-export async function fetchStocks(offset = 0, limit = 2000, asset_type: string = "stock", show_hidden_only: boolean = false): Promise<Stock[]> {
-  const res = await fetch(`${API_URL}/stocks/?offset=${offset}&limit=${limit}&asset_type=${asset_type}&show_hidden_only=${show_hidden_only}`);
+export async function deleteAnalysisResult(symbol: string, id: number): Promise<void> {
+  const res = await fetch(`${API_URL}/stocks/${symbol}/analysis/${id}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Failed to delete analysis result');
+  }
+}
+
+export async function fetchStocks(offset = 0, limit = 2000, asset_type: string = "stock", show_hidden_only: boolean = false, lite: boolean = false): Promise<Stock[]> {
+  const res = await fetch(`${API_URL}/stocks/?offset=${offset}&limit=${limit}&asset_type=${asset_type}&show_hidden_only=${show_hidden_only}&lite=${lite}`);
   if (!res.ok) throw new Error('Failed to fetch stocks');
   return res.json();
 }
@@ -626,8 +717,9 @@ export interface AlertCondition {
   value: number;
 }
 
-export async function fetchAlerts(): Promise<StockAlert[]> {
-  const res = await fetch(`${API_URL}/alerts/`, { headers: { 'Cache-Control': 'no-cache' } });
+export async function fetchAlerts(symbol?: string): Promise<StockAlert[]> {
+  const query = symbol ? `?symbol=${symbol}` : '';
+  const res = await fetch(`${API_URL}/alerts/${query}`, { headers: { 'Cache-Control': 'no-cache' } });
   return res.json();
 }
 
