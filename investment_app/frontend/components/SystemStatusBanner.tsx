@@ -53,7 +53,7 @@ export default function SystemStatusBanner() {
             setStatus(prev => prev ? { ...prev, status: 'running', message: '開始中...' } : null);
         } catch (e) {
             console.error("Failed to trigger update", e);
-            alert("Failed to start update");
+            alert("更新の開始に失敗しました");
         }
     };
 

@@ -58,10 +58,17 @@ class Stock(SQLModel, table=True):
     change_percentage_50d: Optional[float] = None
     
     # New Fields
+    is_buy_candidate: Optional[bool] = Field(default=False)
+    # analysis_file_path and analysis_linked_at defined below
+    
     volume: Optional[float] = None
     volume_increase_pct: Optional[float] = None
     last_earnings_date: Optional[datetime] = None
     next_earnings_date: Optional[datetime] = None
+    
+    # Prediction Fields
+    predicted_price_next: Optional[float] = None
+    predicted_price_today: Optional[float] = None
 
     change_percentage_200d: Optional[float] = None
     
@@ -112,9 +119,28 @@ class Stock(SQLModel, table=True):
     signal_break_atr: Optional[int] = Field(default=0)
     signal_high_slope5ma: Optional[int] = Field(default=0)
     signal_rebound_5ma: Optional[int] = Field(default=0)
+    signal_base_formation: Optional[int] = Field(default=0)
+    
+    # Hide from Dashboard/Update
+    is_hidden: bool = Field(default=False)
 
     first_import_date: Optional[datetime] = Field(default=None)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Manual Analysis File Link
+    analysis_file_path: Optional[str] = Field(default=None)
+    analysis_linked_at: Optional[datetime] = None
+
+class StockAlert(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    symbol: str = Field(index=True)
+    condition_json: str = Field(description="JSON string of conditions (Deprecated, use stages_json)")
+    stages_json: str = Field(default="[]", description="JSON string of list of stages. Each stage is list of conditions.")
+    current_stage_index: int = Field(default=0)
+    is_active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    last_triggered_at: Optional[datetime] = None
+    triggered: bool = Field(default=False)
 
 class SavedFilter(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -133,6 +159,7 @@ class TradeHistory(SQLModel, table=True):
     system_fee: Optional[float] = None
     tax: Optional[float] = None
     total_amount: Optional[float] = None
+    note: Optional[str] = None
 
 class AnalysisResult(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -156,6 +183,7 @@ class GeminiPrompt(SQLModel, table=True):
 class TableViewConfig(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(unique=True)
+    view_type: str = Field(default="dashboard", index=True)
     columns_json: str # JSON list of column keys
     is_default: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.utcnow)

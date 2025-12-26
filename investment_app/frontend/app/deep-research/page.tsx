@@ -44,7 +44,9 @@ export default function DeepResearchPage() {
 
     const logsEndRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
-        logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        if (logsEndRef.current) {
+            logsEndRef.current.scrollTop = logsEndRef.current.scrollHeight;
+        }
     }, [status?.logs]);
 
     async function loadData() {
@@ -142,6 +144,26 @@ export default function DeepResearchPage() {
                         </div>
                     </div>
 
+                    {/* Controls (Moved Up) */}
+                    <div>
+                        {!status?.is_running ? (
+                            <button
+                                onClick={handleStart}
+                                disabled={loading || !selectedPromptId}
+                                className="w-full py-3 bg-blue-600 hover:bg-blue-500 rounded font-bold text-white shadow-lg shadow-blue-900/50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {loading ? t('starting') : t('startResearch')}
+                            </button>
+                        ) : (
+                            <button
+                                onClick={handleStop}
+                                className="w-full py-3 bg-red-600 hover:bg-red-500 rounded font-bold text-white shadow-lg shadow-red-900/50 transition animate-pulse"
+                            >
+                                {t('stopExecution')}
+                            </button>
+                        )}
+                    </div>
+
                     {/* Prompt Selection */}
                     <div className="space-y-2 flex-1 flex flex-col">
                         <div className="flex justify-between items-center">
@@ -160,29 +182,9 @@ export default function DeepResearchPage() {
                                 <option key={p.id} value={p.id}>{p.name}</option>
                             ))}
                         </select>
-                        <div className="flex-1 bg-gray-850 p-3 rounded border border-gray-800 text-xs text-gray-400 overflow-y-auto font-mono mt-2 h-32">
+                        <div className="flex-1 bg-gray-850 p-3 rounded border border-gray-800 text-xs text-gray-400 overflow-y-auto font-mono mt-2 min-h-[128px]">
                             {selectedPrompt?.content || t('selectPromptPlaceholder')}
                         </div>
-                    </div>
-
-                    {/* Controls */}
-                    <div className="pt-4 border-t border-gray-800">
-                        {!status?.is_running ? (
-                            <button
-                                onClick={handleStart}
-                                disabled={loading || !selectedPromptId}
-                                className="w-full py-3 bg-blue-600 hover:bg-blue-500 rounded font-bold text-white shadow-lg shadow-blue-900/50 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {loading ? t('starting') : t('startResearch')}
-                            </button>
-                        ) : (
-                            <button
-                                onClick={handleStop}
-                                className="w-full py-3 bg-red-600 hover:bg-red-500 rounded font-bold text-white shadow-lg shadow-red-900/50 transition animate-pulse"
-                            >
-                                {t('stopExecution')}
-                            </button>
-                        )}
                     </div>
                 </div>
 
@@ -219,7 +221,10 @@ export default function DeepResearchPage() {
                     </div>
 
                     {/* Logs Console */}
-                    <div className="flex-1 bg-gray-950 border border-gray-800 rounded-lg p-4 font-mono text-xs overflow-y-auto">
+                    <div
+                        ref={logsEndRef}
+                        className="flex-1 bg-gray-950 border border-gray-800 rounded-lg p-4 font-mono text-xs overflow-y-auto"
+                    >
                         <div className="text-gray-500 mb-2 border-b border-gray-900 pb-2">{t('executionLogs')}</div>
                         <div className="space-y-1">
                             {status?.logs.map((log, i) => (
@@ -227,7 +232,6 @@ export default function DeepResearchPage() {
                                     {log}
                                 </div>
                             ))}
-                            <div ref={logsEndRef}></div>
                         </div>
                     </div>
                 </div>

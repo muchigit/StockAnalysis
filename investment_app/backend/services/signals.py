@@ -187,7 +187,8 @@ def get_signal_functions():
         "price_up": price_up,
         "break_atr": break_atr,
         "high_slope5ma": high_slope5ma,
-        "rebound_5ma": rebound_5ma
+        "rebound_5ma": rebound_5ma,
+        "base_formation": base_formation
     }
 
 def rebound_5ma(data):
@@ -218,5 +219,38 @@ def rebound_5ma(data):
     slope_t5 = (ma5_t5 - ma5_t6) / ma5_t6 * 1000
     
     if slope_t5 >= 0: return 0
+    
+    return 1
+
+def base_formation(data):
+    """
+    Signal: Base Formation (Tight Area)
+    Criteria:
+    1. Flatness: (Max(Close_10d) - Min(Close_10d)) / Min(Close_10d) <= 0.05
+    2. Volume Contraction: Avg(Vol_10d) < Avg(Vol_prev_20d)
+    """
+    if data.empty or len(data) < 30: return 0
+    
+    # 1. Price Flatness (Last 10 days)
+    # data.iloc[-1] is latest. data.iloc[-10:] is last 10 rows.
+    last_10 = data.tail(10)
+    max_close = last_10['Close'].max()
+    min_close = last_10['Close'].min()
+    
+    if min_close == 0: return 0
+    
+    range_pct = (max_close - min_close) / min_close
+    if range_pct > 0.05: return 0
+    
+    # 2. Volume Contraction
+    # Avg Volume last 10 days
+    avg_vol_10 = last_10['Volume'].mean()
+    
+    # Avg Volume previous 20 days (t-10 to t-29)
+    # slice: data.iloc[-30:-10]
+    prev_20 = data.iloc[-30:-10]
+    avg_vol_prev20 = prev_20['Volume'].mean()
+    
+    if avg_vol_10 >= avg_vol_prev20: return 0
     
     return 1

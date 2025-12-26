@@ -25,6 +25,7 @@ interface ColumnManagerProps {
     onUpdateColumns: (cols: string[]) => void;
     selectedViewId: string;
     onSelectView: (id: string) => void;
+    viewType?: string;
 }
 
 function SortableItem({ id, label, onRemove }: { id: string; label: string, onRemove: () => void }) {
@@ -55,7 +56,7 @@ function SortableItem({ id, label, onRemove }: { id: string; label: string, onRe
     );
 }
 
-export default function ColumnManager({ allColumns, visibleColumns, onUpdateColumns, selectedViewId, onSelectView }: ColumnManagerProps) {
+export default function ColumnManager({ allColumns, visibleColumns, onUpdateColumns, selectedViewId, onSelectView, viewType = "dashboard" }: ColumnManagerProps) {
     const [views, setViews] = useState<TableViewConfig[]>([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -75,11 +76,11 @@ export default function ColumnManager({ allColumns, visibleColumns, onUpdateColu
 
     useEffect(() => {
         loadViews();
-    }, []);
+    }, [viewType]);
 
     const loadViews = async () => {
         try {
-            const data = await fetchViewConfigs();
+            const data = await fetchViewConfigs(viewType);
             setViews(data);
         } catch (e) {
             console.error("Failed to load views", e);
@@ -123,7 +124,7 @@ export default function ColumnManager({ allColumns, visibleColumns, onUpdateColu
                 const name = prompt("この表示設定の名前を入力してください:");
                 if (!name) return;
 
-                const newView = await saveViewConfig(name, JSON.stringify(visibleColumns));
+                const newView = await saveViewConfig(name, JSON.stringify(visibleColumns), viewType);
                 setViews([...views, newView]);
                 onSelectView(newView.id.toString());
             }

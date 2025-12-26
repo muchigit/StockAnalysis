@@ -558,3 +558,195 @@ Content Start: WTFC [%COMPANYNAME%] 分析レポート(2025-12-23)
 # 依頼事項
 以下...
 Replaced with: Wintrust Financial Corporation
+
+--- Processing IMPP ---
+Template has COMPANYNAME? True
+Content Start: IMPP [%COMPANYNAME%] 分析レポート(2025-12-23)
+
+# 依頼事項
+以下...
+Replaced with: Imperial Petroleum Inc.
+
+--- Processing AP ---
+Template has COMPANYNAME? True
+Content Start: AP [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下で示...
+Replaced with: Ampco-Pittsburgh Corporation
+
+--- Processing BIOA ---
+Template has COMPANYNAME? True
+Content Start: BIOA [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: BioAge Labs, Inc.
+
+--- Processing DVAX ---
+Template has COMPANYNAME? True
+Content Start: DVAX [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Dynavax Technologies Corporation
+
+--- Processing ENTA ---
+Template has COMPANYNAME? True
+Content Start: ENTA [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Enanta Pharmaceuticals, Inc.
+
+--- Processing GLSI ---
+Template has COMPANYNAME? True
+Content Start: GLSI [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Greenwich LifeSciences, Inc.
+
+--- Processing OMER ---
+Template has COMPANYNAME? True
+Content Start: OMER [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Omeros Corporation
+
+--- Processing RPTX ---
+Template has COMPANYNAME? True
+Content Start: RPTX [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Repare Therapeutics Inc.
+
+--- Processing TBLA ---
+Template has COMPANYNAME? True
+Content Start: TBLA [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Taboola.com Ltd.
+
+--- Processing TSHA ---
+Template has COMPANYNAME? True
+Content Start: TSHA [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Taysha Gene Therapies, Inc.
+
+--- Processing VERA ---
+Template has COMPANYNAME? True
+Content Start: VERA [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Vera Therapeutics, Inc.
+
+--- Processing XZO ---
+Template has COMPANYNAME? True
+Content Start: XZO [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下で...
+Replaced with: Exzeo Group, Inc.
+
+--- Processing GLSI ---
+Template has COMPANYNAME? True
+Content Start: GLSI [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Greenwich LifeSciences, Inc.
+
+--- Processing OMER ---
+Template has COMPANYNAME? True
+Content Start: OMER [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Omeros Corporation
+
+--- Processing RPTX ---
+Template has COMPANYNAME? True
+Content Start: RPTX [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Repare Therapeutics Inc.
+
+--- Processing TBLA ---
+Template has COMPANYNAME? True
+Content Start: TBLA [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Taboola.com Ltd.
+
+--- Processing TSHA ---
+Template has COMPANYNAME? True
+Content Start: TSHA [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Taysha Gene Therapies, Inc.
+
+--- Processing VERA ---
+Template has COMPANYNAME? True
+Content Start: VERA [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Vera Therapeutics, Inc.
+
+--- Processing XZO ---
+Template has COMPANYNAME? True
+Content Start: XZO [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下で...
+Replaced with: Exzeo Group, Inc.
+
+--- Processing DXR ---
+Template has COMPANYNAME? True
+Content Start: DXR [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下で...
+Replaced with: Daxor Corporation
+
+--- Processing TWIN ---
+Template has COMPANYNAME? True
+Content Start: TWIN [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Twin Disc, Incorporated
+
+--- Processing DXR ---
+Template has COMPANYNAME? True
+Content Start: DXR [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下で...
+Replaced with: Daxor Corporation
+
+--- Processing SIM ---
+Template has COMPANYNAME? True
+Content Start: SIM [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下で...
+Replaced with: Grupo Simec, S.A.B. de C.V.
+
+--- Processing TBLA ---
+Template has COMPANYNAME? True
+Content Start: TBLA [%COMPANYNAME%] 分析レポート(2025-12-25)
+
+# 依頼事項
+以下...
+Replaced with: Taboola.com Ltd.

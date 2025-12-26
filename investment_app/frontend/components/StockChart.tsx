@@ -3,7 +3,6 @@
 import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickData, HistogramData, SeriesMarker, LineStyle, PriceScaleMode } from 'lightweight-charts';
 import { useEffect, useRef, useState } from 'react';
 
-// ... imports
 interface ChartProps {
     data: {
         time: string;
@@ -28,8 +27,9 @@ interface ChartProps {
 export const StockChart = (props: ChartProps & {
     smas?: { key: string, color: string }[],
     visibleBars?: number,
-    interval?: '1d' | '1wk' | '1mo', // Added interval prop
-    logScale?: boolean // Added logScale prop
+    interval?: '1d' | '1wk' | '1mo',
+    logScale?: boolean,
+    onChartDoubleClick?: (price: number) => void
 }) => {
     const {
         data,
@@ -42,21 +42,24 @@ export const StockChart = (props: ChartProps & {
         smas = [],
         visibleBars,
         interval = '1d', // Default to 1d
-        logScale = false
+        logScale = false,
+        onChartDoubleClick
     } = props;
-
-
-
 
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
-    const [tooltipData, setTooltipData] = useState<{
-        visible: boolean;
-        x: number;
-        y: number;
-        price: number;
+
+    // Legend State
+    const [legendData, setLegendData] = useState<{
+        open: number;
+        high: number;
+        low: number;
+        close: number;
         change: number;
         changePercent: number;
+        volume: number;
+        volChangePercent: number;
+        color: string; // Text color class
         timeStr: string;
     } | null>(null);
 
@@ -182,14 +185,63 @@ export const StockChart = (props: ChartProps & {
             chart.timeScale().fitContent();
         }
 
-        // --- Tooltip Logic ---
-        // Create a map for fast lookup: time -> { close, prevClose }
-        const dataMap = new Map<string, { close: number; prevClose?: number }>();
+        // --- Tooltip / Legend Init Logic ---
+        // Helper to format date
+        const formatDate = (dateStr: string) => {
+            let displayDate = String(dateStr);
+            try {
+                const dateObj = new Date(dateStr);
+                if (!isNaN(dateObj.getTime())) {
+                    const y = dateObj.getFullYear();
+                    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+                    const d = String(dateObj.getDate()).padStart(2, '0');
+                    displayDate = `${y}-${m}-${d}`;
+                }
+            } catch (e) { }
+            return displayDate;
+        };
+
+        // Initialize Legend with Latest Data
+        const latestIdx = sortedData.length - 1;
+        if (latestIdx >= 0) {
+            const latest = sortedData[latestIdx];
+            const prev = latestIdx > 0 ? sortedData[latestIdx - 1] : undefined;
+            const prevClose = prev ? prev.close : latest.open; // Fallback
+            const change = latest.close - prevClose;
+            const changePercent = (change / prevClose) * 100;
+            const isUp = change >= 0;
+
+            // Vol Change
+            const prevVol = prev ? prev.volume : latest.volume; // If no prev, change is 0% based on self
+            const volChangePercent = prevVol ? ((latest.volume - prevVol) / prevVol) * 100 : 0;
+
+            setLegendData({
+                open: latest.open,
+                high: latest.high,
+                low: latest.low,
+                close: latest.close,
+                change,
+                changePercent,
+                volume: latest.volume,
+                volChangePercent,
+                color: isUp ? 'text-red-500' : 'text-blue-500',
+                timeStr: formatDate(latest.time)
+            });
+        }
+
+        // --- Tooltip / Legend Crosshair Logic ---
+        // Create a map for fast lookup: time -> { o, h, l, c, v, prevClose, prevVol }
+        const dataMap = new Map<string, { o: number; h: number; l: number; c: number; v: number; prevClose?: number; prevVol?: number }>();
         sortedData.forEach((d, i) => {
             const prev = i > 0 ? sortedData[i - 1] : undefined;
             dataMap.set(d.time as string, {
-                close: d.close,
+                o: d.open,
+                h: d.high,
+                l: d.low,
+                c: d.close,
+                v: d.volume,
                 prevClose: prev?.close,
+                prevVol: prev?.volume,
             });
         });
 
@@ -202,95 +254,136 @@ export const StockChart = (props: ChartProps & {
                 param.point.y < 0 ||
                 param.point.y > chartContainerRef.current!.clientHeight
             ) {
-                setTooltipData(null);
+                // Revert to latest data
+                if (latestIdx >= 0) {
+                    const latest = sortedData[latestIdx];
+                    const prev = latestIdx > 0 ? sortedData[latestIdx - 1] : undefined;
+                    const prevClose = prev ? prev.close : latest.open;
+                    const change = latest.close - prevClose;
+                    const changePercent = (change / prevClose) * 100;
+                    const isUp = change >= 0;
+
+                    const prevVol = prev ? prev.volume : latest.volume;
+                    const volChangePercent = prevVol ? ((latest.volume - prevVol) / prevVol) * 100 : 0;
+
+                    setLegendData({
+                        open: latest.open,
+                        high: latest.high,
+                        low: latest.low,
+                        close: latest.close,
+                        change,
+                        changePercent,
+                        volume: latest.volume,
+                        volChangePercent,
+                        color: isUp ? 'text-red-500' : 'text-blue-500',
+                        timeStr: formatDate(latest.time)
+                    });
+                } else {
+                    setLegendData(null);
+                }
             } else {
                 const dateStr = param.time as string;
                 const item = dataMap.get(dateStr);
 
                 if (item) {
-                    const price = item.close;
-                    const prevClose = item.prevClose;
+                    const prevClose = item.prevClose !== undefined ? item.prevClose : item.o; // Fallback
+                    const change = item.c - prevClose;
+                    const changePercent = (change / prevClose) * 100;
+                    const isUp = change >= 0;
 
-                    let change = 0;
-                    let changePercent = 0;
+                    const prevVol = item.prevVol !== undefined ? item.prevVol : item.v;
+                    const volChangePercent = prevVol ? ((item.v - prevVol) / prevVol) * 100 : 0;
 
-                    if (prevClose !== undefined) {
-                        change = price - prevClose;
-                        changePercent = (change / prevClose) * 100;
-                    }
-
-                    // Format Date String based on interval (Force YYYY-MM-DD)
-                    let displayDate = String(dateStr);
-                    try {
-                        const dateObj = new Date(dateStr);
-                        if (!isNaN(dateObj.getTime())) {
-                            const y = dateObj.getFullYear();
-                            const m = String(dateObj.getMonth() + 1).padStart(2, '0');
-                            const d = String(dateObj.getDate()).padStart(2, '0');
-                            displayDate = `${y}-${m}-${d}`;
-                        }
-                    } catch (e) { }
-
-                    setTooltipData({
-                        visible: true,
-                        x: param.point.x,
-                        y: param.point.y,
-                        price,
+                    setLegendData({
+                        open: item.o,
+                        high: item.h,
+                        low: item.l,
+                        close: item.c,
                         change,
                         changePercent,
-                        timeStr: displayDate,
+                        volume: item.v,
+                        volChangePercent,
+                        color: isUp ? 'text-red-500' : 'text-blue-500',
+                        timeStr: formatDate(dateStr)
                     });
-                } else {
-                    setTooltipData(null);
                 }
             }
         });
 
+        // Double Click Handler
+        const handleDblClick = (e: MouseEvent) => {
+            if (!onChartDoubleClick || !chartContainerRef.current) return;
+
+            const rect = chartContainerRef.current.getBoundingClientRect();
+            const y = e.clientY - rect.top;
+
+            const seriesApi = candlestickSeries as unknown as ISeriesApi<"Candlestick">;
+            const price = seriesApi.coordinateToPrice(y);
+
+            if (price !== null) {
+                onChartDoubleClick(price);
+            }
+        };
+
+        if (chartContainerRef.current) {
+            chartContainerRef.current.addEventListener('dblclick', handleDblClick);
+        }
+
         window.addEventListener('resize', handleResize);
 
         return () => {
+            if (chartContainerRef.current) {
+                chartContainerRef.current.removeEventListener('dblclick', handleDblClick);
+            }
             window.removeEventListener('resize', handleResize);
             chart.remove();
             chartRef.current = null;
         };
-    }, [data, markers, backgroundColor, textColor, height, smas, visibleBars, interval, logScale]);
+    }, [data, markers, backgroundColor, textColor, height, smas, visibleBars, interval, logScale, onChartDoubleClick]);
 
     return (
-        <div className="relative w-full group">
-            <div
-                ref={chartContainerRef}
-                className="w-full"
-                style={{ height: `${height}px` }}
-            />
-            {tooltipData && tooltipData.visible && (
-                <div
-                    className="absolute z-50 p-2 text-sm bg-gray-900/90 border border-gray-700 rounded shadow-lg backdrop-blur pointer-events-none select-none"
-                    style={{
-                        left: Math.min(tooltipData.x + 15, (chartContainerRef.current?.clientWidth || 0) - 160), // Prevent overflow right
-                        top: Math.max(10, tooltipData.y - 10), // Keep it near y but not off-top
-                        minWidth: '140px'
-                    }}
-                >
-                    <div className="text-gray-400 text-xs mb-1">{tooltipData.timeStr}</div>
-                    <div className="flex justify-between items-center mb-1">
-                        <span className="text-gray-300">Close</span>
-                        <span className="font-mono text-white text-base font-bold">
-                            {tooltipData.price.toFixed(2)}
+        <div className="relative w-full group text-sm font-mono select-none">
+            {/* Legend Overlay */}
+            {legendData && (
+                <div className="absolute top-1 left-2 z-20 flex flex-wrap gap-x-4 gap-y-1 pointer-events-none bg-white/90 p-1 rounded border border-gray-200 shadow-sm">
+                    <div className="text-black mr-2 font-bold">{legendData.timeStr}</div>
+                    <div className="flex gap-1">
+                        <span className="text-black font-bold">始</span>
+                        <span className={legendData.color}>{legendData.open.toFixed(2)}</span>
+                    </div>
+                    <div className="flex gap-1">
+                        <span className="text-black font-bold">高</span>
+                        <span className={legendData.color}>{legendData.high.toFixed(2)}</span>
+                    </div>
+                    <div className="flex gap-1">
+                        <span className="text-black font-bold">安</span>
+                        <span className={legendData.color}>{legendData.low.toFixed(2)}</span>
+                    </div>
+                    <div className="flex gap-1">
+                        <span className="text-black font-bold">終</span>
+                        <span className={legendData.color}>{legendData.close.toFixed(2)}</span>
+                    </div>
+                    <div className="flex gap-1">
+                        <span className={`font-bold ${legendData.color}`}>
+                            {legendData.change > 0 ? '+' : ''}{legendData.change.toFixed(2)} ({legendData.changePercent.toFixed(2)}%)
                         </span>
                     </div>
-                    <div className="flex justify-between items-center">
-                        <span className="text-gray-300">Change</span>
-                        <span className={`font-mono font-bold ${tooltipData.change > 0 ? 'text-red-500' :
-                            tooltipData.change < 0 ? 'text-blue-500' : 'text-gray-400'
-                            }`}>
-                            {tooltipData.change > 0 ? '+' : ''}{tooltipData.change.toFixed(2)}
-                            <span className="text-xs ml-1 opacity-80">
-                                ({tooltipData.changePercent.toFixed(2)}%)
+                    <div className="flex gap-1">
+                        <span className="text-black font-bold">出来高</span>
+                        <span className={legendData.color}>
+                            {(legendData.volume / 1000).toFixed(0)}K
+                            <span className="ml-1 opacity-80">
+                                ({legendData.volChangePercent > 0 ? '+' : ''}{legendData.volChangePercent.toFixed(1)}%)
                             </span>
                         </span>
                     </div>
                 </div>
             )}
+            <div
+                ref={chartContainerRef}
+                className="w-full"
+                style={{ height: `${height}px` }}
+            />
         </div>
     );
 };

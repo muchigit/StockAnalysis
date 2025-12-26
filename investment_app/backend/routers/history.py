@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session, select
+from sqlmodel import Session, select, SQLModel
 from ..database import get_session, TradeHistory
 from datetime import datetime
 from typing import List, Dict, Any
@@ -40,6 +40,16 @@ def calculate_analytics(trades: List[TradeHistory]):
     for sym, df in results:
         if df is not None:
             market_data[sym] = df
+            
+    # Pre-fetch Company Names
+    company_names = {}
+    try:
+        # Optimization: Fetch all stocks and create a look-up map
+        all_stocks = stock_service.get_all_stocks()
+        for s in all_stocks:
+            company_names[s.symbol] = s.company_name
+    except Exception as e:
+        print(f"Error fetching company names: {e}")
 
 
     # Portfolio State per Symbol
@@ -62,11 +72,16 @@ def calculate_analytics(trades: List[TradeHistory]):
         sym = t.symbol
         pf = portfolio[sym]
         
+        # Get Company Name (cached)
+        company_name = company_names.get(sym, "")
+
         # Prepare expanded trade object
         trade_data = t.dict()
         trade_data['realized_pl'] = 0.0
         trade_data['roi_pct'] = 0.0
         trade_data['avg_cost'] = pf['avg_cost']
+        trade_data['company_name'] = company_name
+
         
         # --- Post-Trade Performance Metrics ---
         # Calculate % change 1d, 5d, 20d, 50d after execution
@@ -200,3 +215,17 @@ def get_history_analytics(session: Session = Depends(get_session)):
         return calculate_analytics(trades)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+class TradeNoteUpdate(SQLModel):
+    note: str
+
+@router.put("/{trade_id}/note")
+def update_trade_note(trade_id: int, update: TradeNoteUpdate, session: Session = Depends(get_session)):
+    trade = session.get(TradeHistory, trade_id)
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    trade.note = update.note
+    session.add(trade)
+    session.commit()
+    session.refresh(trade)
+    return trade

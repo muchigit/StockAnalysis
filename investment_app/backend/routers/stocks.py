@@ -16,6 +16,9 @@ from pydantic import BaseModel
 class StockUpdateRequest(BaseModel):
     composite_rating: Optional[int] = None
     rs_rating: Optional[int] = None
+    is_hidden: Optional[bool] = None
+    is_buy_candidate: Optional[bool] = None
+    analysis_file_path: Optional[str] = None
     # For now, we auto-set date on update or allow manual? Requirement said "save button updates with current date"
 
 
@@ -32,11 +35,23 @@ class StockResponse(Stock):
     latest_analysis: Optional[str] = None
 
 @router.get("/", response_model=List[StockResponse])
-def list_stocks(offset: int = 0, limit: int = 2000, asset_type: str = "stock", session: Session = Depends(get_session)):
+def list_stocks(
+    offset: int = 0, 
+    limit: int = 2000, 
+    asset_type: str = "stock", 
+    show_hidden_only: bool = False,
+    session: Session = Depends(get_session)
+):
     # Fetch stocks
     query = select(Stock).offset(offset).limit(limit)
     if asset_type:
         query = query.where(Stock.asset_type == asset_type)
+        
+    if show_hidden_only:
+        query = query.where(Stock.is_hidden == True)
+    else:
+        query = query.where(Stock.is_hidden == False)
+        
     stocks = session.exec(query).all()
     
     # Calculate holdings for these stocks
@@ -108,6 +123,14 @@ def list_stocks(offset: int = 0, limit: int = 2000, asset_type: str = "stock", s
         elif cnt > 0:
             status = "Past Trade"
             
+        latest = analysis_map.get(s.symbol)
+        if not latest and s.analysis_file_path:
+            import os
+            fname = os.path.basename(s.analysis_file_path)
+            date_str = s.analysis_linked_at.strftime('%Y-%m-%d') if s.analysis_linked_at else datetime.utcnow().strftime('%Y-%m-%d')
+            # If manually linked, show date and filename
+            latest = f"[{date_str}] {fname}"
+
         resp = StockResponse(
             **s.dict(),
             holding_quantity=qty,
@@ -119,7 +142,7 @@ def list_stocks(offset: int = 0, limit: int = 2000, asset_type: str = "stock", s
             unrealized_pl=unrealized_pl,
             average_cost=avg_cost,
             note=notes_map.get(s.symbol),
-            latest_analysis=analysis_map.get(s.symbol)
+            latest_analysis=latest
         )
         response.append(resp)
         
@@ -190,6 +213,27 @@ def get_stock_detail(symbol: str, session: Session = Depends(get_session)):
              analysis_content = db_analysis.content
          # If analysis_content from GDrive is present, we keep it.
 
+    # 3. Manually Linked File Injection (Highest Priority for List View logic if we were listing, 
+    # but here we just return 'latest_analysis' string.
+    # The requirement is "explicitly link file path". 
+    # If a file path is linked, should we show that as "latest_analysis"?
+    # The 'latest_analysis' field is string content.
+    # If we have a file path, maybe we should prepend a link or notice?
+    # Or rely on the frontend to show the file link separately.
+    # The frontend plan says: "Display current linked path (if any)".
+    # So we don't necessarily need to jam it into 'latest_analysis' string.
+    # BUT, the plan also said "Update `get_analysis_history` to inject linked file".
+    # Wait, `get_stock_detail` returns `StockResponse` which inherits `Stock`.
+    # `Stock` now has `analysis_file_path`.
+    # So the frontend will receive `analysis_file_path` directly!
+    # We don't need to inject it into `latest_analysis` string unless we want it to show up in that specific text block.
+    # However, for `list_stocks` (the table view), we might want to know if there is a file.
+    # `StockResponse` has `latest_analysis` (string).
+    # `Stock` has `analysis_file_path`.
+    # So the data is already there in the `Stock` part of `StockResponse`.
+    
+    # Let's just ensure `analysis_file_path` is passed. It is part of `Stock` model, so `**stock.dict()` covers it.
+    
     qty = stats['qty']
     cnt = stats['cnt']
     status = "None"
@@ -223,6 +267,16 @@ def update_stock(symbol: str, update_data: StockUpdateRequest, session: Session 
         stock.composite_rating = update_data.composite_rating
     if update_data.rs_rating is not None:
         stock.rs_rating = update_data.rs_rating
+    if update_data.is_hidden is not None:
+        stock.is_hidden = update_data.is_hidden
+    if update_data.is_buy_candidate is not None:
+        stock.is_buy_candidate = update_data.is_buy_candidate
+    if update_data.analysis_file_path is not None:
+        stock.analysis_file_path = update_data.analysis_file_path
+        if update_data.analysis_file_path:
+             stock.analysis_linked_at = datetime.utcnow()
+        else:
+             stock.analysis_linked_at = None
         
     # Update date if any rating changed
     if update_data.composite_rating is not None or update_data.rs_rating is not None:
@@ -504,6 +558,20 @@ def get_analysis_history(symbol: str, session: Session = Depends(get_session)):
     # 1. Fetch DB Results
     db_results = session.exec(select(AnalysisResult).where(AnalysisResult.symbol == symbol).order_by(AnalysisResult.created_at.desc())).all()
     
+    # 0. Check manual link
+    stock = session.get(Stock, symbol)
+    manual_results = []
+    if stock and stock.analysis_file_path:
+        import os
+        date_str = stock.analysis_linked_at.strftime('%Y-%m-%d') if stock.analysis_linked_at else datetime.utcnow().strftime('%Y-%m-%d')
+        manual_results.append(AnalysisResult(
+            symbol=symbol,
+            content=f"[{date_str}] {os.path.basename(stock.analysis_file_path)}",
+            created_at=stock.analysis_linked_at or datetime.utcnow(),
+            file_path=stock.analysis_file_path,
+            id=-999 # Pseudo ID
+        ))
+    
     # 2. Fetch GDrive Results
     gdrive_data = gdrive_loader.search_reports(symbol)
     
@@ -523,8 +591,8 @@ def get_analysis_history(symbol: str, session: Session = Depends(get_session)):
         gdrive_results.append(res)
 
     # 3. Merge and Sort
-    # Combine (GDrive first, or sort by date)
-    combined = list(db_results) + gdrive_results
+    # Combine (Manual first, then DB/GDrive)
+    combined = manual_results + list(db_results) + gdrive_results
     combined.sort(key=lambda x: x.created_at or datetime.min, reverse=True)
     
     return combined

@@ -8,24 +8,30 @@ router = APIRouter(prefix="/views", tags=["views"])
 
 class ViewConfigCreate(BaseModel):
     name: str
+    view_type: str = "dashboard"
     columns_json: str
     is_default: Optional[bool] = False
 
 class ViewConfigUpdate(BaseModel):
     name: Optional[str] = None
+    view_type: Optional[str] = None
     columns_json: Optional[str] = None
     is_default: Optional[bool] = None
 
 @router.get("/", response_model=List[TableViewConfig])
-def get_views():
+def get_views(view_type: str = Query("dashboard")):
     with Session(engine) as session:
-        return session.exec(select(TableViewConfig)).all()
+        return session.exec(select(TableViewConfig).where(TableViewConfig.view_type == view_type)).all()
 
 @router.post("/", response_model=TableViewConfig)
 def create_view(config: ViewConfigCreate):
     with Session(engine) as session:
-        # Check if name exists
-        existing = session.exec(select(TableViewConfig).where(TableViewConfig.name == config.name)).first()
+        # Check if name exists within the same view_type
+        existing = session.exec(select(TableViewConfig).where(
+            TableViewConfig.name == config.name,
+            TableViewConfig.view_type == config.view_type
+        )).first()
+        
         if existing:
             # Update existing
             existing.columns_json = config.columns_json
@@ -37,6 +43,7 @@ def create_view(config: ViewConfigCreate):
         else:
             new_view = TableViewConfig(
                 name=config.name, 
+                view_type=config.view_type,
                 columns_json=config.columns_json, 
                 is_default=config.is_default
             )

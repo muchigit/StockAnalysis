@@ -1,4 +1,4 @@
-const API_URL = 'http://localhost:8000';
+const API_URL = 'http://127.0.0.1:8000';
 
 export interface Stock {
   symbol: string;
@@ -11,6 +11,7 @@ export interface Stock {
   status: 'None' | 'Holding' | 'Past Trade';
   holding_quantity: number;
   trade_count: number;
+  is_hidden?: boolean;
   last_buy_date?: string;
   last_sell_date?: string;
   realized_pl?: number;
@@ -24,10 +25,15 @@ export interface Stock {
   change_percentage_200d?: number;
 
   // New Fields
+  is_buy_candidate?: boolean;
   volume?: number;
   volume_increase_pct?: number;
   last_earnings_date?: string;
   next_earnings_date?: string;
+
+  // Predictions
+  predicted_price_next?: number;
+  predicted_price_today?: number;
 
   // Deviations
   deviation_5ma_pct?: number;
@@ -40,6 +46,8 @@ export interface Stock {
   slope_20ma?: number;
   slope_50ma?: number;
   slope_200ma?: number;
+
+
 
   current_price?: number;
   rs_5d?: number;
@@ -54,6 +62,7 @@ export interface Stock {
   rs_rating?: number;
   ibd_rating_date?: string;
   first_import_date?: string;
+  analysis_file_path?: string;
 
   // Signals
   signal_higher_200ma?: number;
@@ -71,6 +80,8 @@ export interface Stock {
   signal_break_atr?: number;
   signal_high_slope5ma?: number;
   signal_rebound_5ma?: number;
+  signal_base_formation?: number;
+
 
   updated_at?: string;
   daily_chart_data?: string; // JSON
@@ -139,6 +150,7 @@ export interface ChartData {
 export interface TradeHistory {
   id: number;
   symbol: string;
+  company_name?: string;
   trade_type: string;
   quantity: number;
   price: number;
@@ -146,6 +158,16 @@ export interface TradeHistory {
   system_fee?: number;
   tax?: number;
   total_amount?: number;
+  note?: string;
+  // Computed/Frontend fields
+  realized_pl?: number;
+  roi_pct?: number;
+  cost_basis?: number;
+  avg_cost?: number;
+  return_1d?: number;
+  return_5d?: number;
+  return_20d?: number;
+  return_50d?: number;
 }
 
 export interface HistoryAnalytics {
@@ -240,8 +262,8 @@ export async function fetchStockAnalysis(symbol: string): Promise<AnalysisResult
   return res.json();
 }
 
-export async function fetchStocks(offset = 0, limit = 2000, asset_type: string = "stock"): Promise<Stock[]> {
-  const res = await fetch(`${API_URL}/stocks/?offset=${offset}&limit=${limit}&asset_type=${asset_type}`);
+export async function fetchStocks(offset = 0, limit = 2000, asset_type: string = "stock", show_hidden_only: boolean = false): Promise<Stock[]> {
+  const res = await fetch(`${API_URL}/stocks/?offset=${offset}&limit=${limit}&asset_type=${asset_type}&show_hidden_only=${show_hidden_only}`);
   if (!res.ok) throw new Error('Failed to fetch stocks');
   return res.json();
 }
@@ -459,22 +481,23 @@ export async function stopResearch(): Promise<void> {
 export interface TableViewConfig {
   id: number;
   name: string;
+  view_type: string;
   columns_json: string;
   is_default: boolean;
   created_at?: string;
 }
 
-export async function fetchViewConfigs(): Promise<TableViewConfig[]> {
-  const res = await fetch(`${API_URL}/views/`);
+export async function fetchViewConfigs(viewType: string = "dashboard"): Promise<TableViewConfig[]> {
+  const res = await fetch(`${API_URL}/views/?view_type=${viewType}`);
   if (!res.ok) throw new Error('Failed to fetch views');
   return res.json();
 }
 
-export async function saveViewConfig(name: string, columns_json: string, is_default = false): Promise<TableViewConfig> {
+export async function saveViewConfig(name: string, columnsJson: string, viewType: string = "dashboard"): Promise<TableViewConfig> {
   const res = await fetch(`${API_URL}/views/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, columns_json, is_default })
+    body: JSON.stringify({ name, columns_json: columnsJson, view_type: viewType })
   });
   if (!res.ok) throw new Error('Failed to save view');
   return res.json();
@@ -573,4 +596,64 @@ export async function generateText(prompt: string): Promise<string> {
   if (!res.ok) throw new Error('Failed to generate text: ' + res.status);
   const data = await res.json();
   return data.text;
+}
+
+export async function updateTradeNote(tradeId: number, note: string): Promise<void> {
+  const res = await fetch(`${API_URL}/history/${tradeId}/note`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ note })
+  });
+  if (!res.ok) throw new Error('Failed to update note');
+}
+
+// Alerts
+export interface StockAlert {
+  id?: number;
+  symbol: string;
+  condition_json: string; // Stored as JSON string
+  stages_json?: string; // List of stages
+  current_stage_index?: number;
+  is_active: boolean;
+  created_at?: string;
+  last_triggered_at?: string;
+  triggered: boolean;
+}
+
+export interface AlertCondition {
+  metric: string; // 'current_price', 'deviation_5ma_pct', etc.
+  op: 'gte' | 'lte' | 'eq';
+  value: number;
+}
+
+export async function fetchAlerts(): Promise<StockAlert[]> {
+  const res = await fetch(`${API_URL}/alerts/`, { headers: { 'Cache-Control': 'no-cache' } });
+  return res.json();
+}
+
+export async function createAlert(alert: StockAlert): Promise<StockAlert> {
+  const res = await fetch(`${API_URL}/alerts/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(alert)
+  });
+  return res.json();
+}
+
+export async function updateAlert(id: number, alert: Partial<StockAlert>): Promise<StockAlert> {
+  const res = await fetch(`${API_URL}/alerts/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(alert)
+  });
+  return res.json();
+}
+
+export async function deleteAlert(id: number): Promise<void> {
+  await fetch(`${API_URL}/alerts/${id}`, { method: 'DELETE' });
+}
+
+export async function checkAlerts(): Promise<StockAlert[]> {
+  const res = await fetch(`${API_URL}/alerts/check`, { method: 'POST' });
+  return res.json();
 }

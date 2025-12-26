@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo, useRef } from 'react';
-import { fetchStocks, Stock, triggerImport, createStock, pickFile, updateStock, openAnalysisFolder } from '@/lib/api';
+import { fetchStocks, Stock, triggerImport, createStock, pickFile, updateStock, openAnalysisFolder, fetchStockPriceHistory, generateText, saveStockNote, fetchPrompts, GeminiPrompt } from '@/lib/api';
 import { addResearchTicker } from '@/lib/research-storage';
 import Toast from '@/components/Toast';
 import Link from 'next/link';
@@ -14,28 +14,50 @@ import HeaderFilter, { ColumnFilterValue } from '@/components/HeaderFilter';
 import SystemStatusBanner from '@/components/SystemStatusBanner';
 import MiniCandleChart from '@/components/MiniCandleChart';
 import SortIcon from '@/components/SortIcon';
+
+import AlertDialog from '@/components/AlertDialog';
+import { fetchAlerts, checkAlerts, StockAlert, AlertCondition } from '@/lib/api';
 import { exportToExcel } from '@/lib/excel-exporter';
+import { getRatingColor } from '@/lib/utils';
 
 
-const DEFAULT_COLUMNS = ['symbol', 'company_name', 'sector', 'industry', 'composite_rating', 'rs_rating', 'note', 'latest_analysis', 'status', 'change_percentage_1d', 'change_percentage_5d', 'change_percentage_20d', 'change_percentage_50d', 'change_percentage_200d', 'last_buy_date', 'last_sell_date', 'daily_chart_data', 'daily_chart_data_large', 'market_cap', 'volume', 'volume_increase_pct', 'last_earnings_date', 'next_earnings_date', 'realized_pl', 'first_import_date'];
+const DEFAULT_COLUMNS = ['is_buy_candidate', 'symbol', 'company_name', 'sector', 'industry', 'composite_rating', 'rs_rating', 'note', 'note_multiline', 'latest_analysis', 'status', 'change_percentage_1d', 'change_percentage_5d', 'change_percentage_20d', 'change_percentage_50d', 'change_percentage_200d', 'last_buy_date', 'last_sell_date', 'daily_chart_data', 'daily_chart_data_large', 'market_cap', 'volume', 'volume_increase_pct', 'last_earnings_date', 'next_earnings_date', 'realized_pl', 'first_import_date'];
 
 import TradingDialog from '@/components/Trading/TradingDialog';
 
-export default function Dashboard() {
+
+interface ColumnDef {
+    key: string;
+    label: string;
+    width?: number;
+    sortable?: boolean;
+    header?: string;
+    type?: 'string' | 'number' | 'date' | 'percentage';
+    format?: (val: any) => string;
+    visible?: boolean;
+}
+
+interface DashboardProps {
+    showHiddenOnly?: boolean;
+}
+
+export default function Dashboard({ showHiddenOnly = false }: DashboardProps) {
     const { t } = useTranslation();
     const router = useRouter();
     const searchParams = useSearchParams();
     const pathname = usePathname();
+    const abortBatchRef = useRef(false);
 
     // Column Definitions (Memoized for translation)
-    const ALL_COLUMNS = useMemo(() => [
-        { key: 'symbol', label: t('ticker') || 'ティッカー' },
-        { key: 'company_name', label: t('companyName') || '会社名' },
-        { key: 'sector', label: t('sector') || 'セクター' },
-        { key: 'industry', label: t('industry') || '業界' },
+    const INITIAL_COLUMNS: ColumnDef[] = useMemo(() => [
+        { key: 'is_buy_candidate', label: '買い', width: 50, sortable: true, header: '★' },
+        { key: 'symbol', label: (t('symbol' as any) || 'Symbol'), width: 80, sortable: true },
+        { key: 'company_name', label: t('companyName') || 'Company Name', width: 200, sortable: true },
+        { key: 'sector', label: t('sector') || 'Sector', width: 120, sortable: true }, { key: 'industry', label: t('industry') || '業界' },
         { key: 'composite_rating', label: 'CR' },
         { key: 'rs_rating', label: 'RS' },
         { key: 'note', label: t('note') || 'メモ', width: 200 },
+        { key: 'note_multiline', label: 'メモ(複数行)', width: 600 },
         { key: 'latest_analysis', label: t('analysis') || 'AI分析', width: 100 },
         { key: 'status', label: t('status') || 'ステータス' },
         { key: 'change_percentage_1d', label: '1D %' },
@@ -46,25 +68,70 @@ export default function Dashboard() {
         { key: 'last_buy_date', label: t('lastBuy') || '直近買付' },
         { key: 'last_sell_date', label: t('lastSell') || '直近売却' },
         { key: 'daily_chart_data', label: t('chart') || 'チャート', width: 200 },
-        { key: 'daily_chart_data_large', label: t('chartLarge') || 'チャート(大)', width: 400 },
-        { key: 'realized_pl', label: t('realizedPL') || '確定損益' },
-        { key: 'first_import_date', label: t('importedAt') || '取込日' },
+        { key: 'daily_chart_data_large', label: 'チャート(大)', width: 400 },
+        { key: 'realized_pl', label: '確定損益' },
+        { key: 'first_import_date', label: '取込日' },
         { key: 'updated_at', label: 'Updated' },
-        { key: 'current_price', label: t('price') || '価格' },
-        { key: 'market_cap', label: 'Market Cap' },
-        { key: 'deviation_5ma_pct', label: t('dev5') || '乖離5MA' },
-        { key: 'deviation_20ma_pct', label: t('dev20') || '乖離20MA' },
-        { key: 'deviation_50ma_pct', label: t('dev50') || '乖離50MA' },
-        { key: 'deviation_200ma_pct', label: t('dev200') || '乖離200MA' },
+        { key: 'current_price', label: '価格' },
+        { key: 'market_cap', label: '時価総額' },
+        { key: 'deviation_5ma_pct', label: '乖離5MA' },
+        { key: 'deviation_20ma_pct', label: '乖離20MA' },
+        { key: 'deviation_50ma_pct', label: '乖離50MA' },
+        { key: 'deviation_200ma_pct', label: '乖離200MA' },
         // New Fields
-        { key: 'volume', label: t('volume') || '出来高' },
-        { key: 'volume_increase_pct', label: t('volIncrease') || '出来高増%' },
-        { key: 'last_earnings_date', label: t('lastEarnings') || '直近決算' },
-        { key: 'next_earnings_date', label: t('nextEarnings') || '次回決算' },
+        { key: 'volume', label: '出来高' },
+        { key: 'volume_increase_pct', label: '出来高増%' },
+        { key: 'last_earnings_date', label: '直近決算', type: 'date' },
+        { key: 'next_earnings_date', label: '次回決算', type: 'date' },
+        // Predictions
+        { key: 'predicted_price_today', label: '推測値(前日)' },
+        { key: 'predicted_price_next', label: '推測値(翌日)' },
+        // Signals
+        { key: 'signal_base_formation', label: 'Base' },
+        // Slopes
+        { key: 'slope_5ma', label: '傾き(5)', type: 'number', format: (val: number) => val?.toFixed(2), header: '傾き 5MA', visible: false, sortable: true },
+        { key: 'slope_20ma', label: '傾き(20)', type: 'number', format: (val: number) => val?.toFixed(2), header: '傾き 20MA', visible: false, sortable: true },
+        { key: 'slope_50ma', label: '傾き(50)', type: 'number', format: (val: number) => val?.toFixed(2), header: '傾き 50MA', visible: false, sortable: true },
+        { key: 'slope_200ma', label: '傾き(200)', type: 'number', format: (val: number) => val?.toFixed(2), header: '傾き 200MA', visible: false, sortable: true },
     ], [t]);
 
     // State
     const [stocks, setStocks] = useState<Stock[]>([]);
+    const [showBatchDialog, setShowBatchDialog] = useState(false);
+    const [prompts, setPrompts] = useState<GeminiPrompt[]>([]);
+    const [selectedBatchPromptId, setSelectedBatchPromptId] = useState<number | string>("");
+    const [batchProgress, setBatchProgress] = useState<{ current: number, total: number, status: 'idle' | 'running' | 'paused' | 'error' | 'complete', message: string, detail: string }>({ current: 0, total: 0, status: 'idle', message: '', detail: '' });
+
+    // Load Prompts for Batch
+    useEffect(() => {
+        if (showBatchDialog && prompts.length === 0) {
+            fetchPrompts().then(setPrompts).catch(console.error);
+        }
+    }, [showBatchDialog]);
+    // Alert State
+    const [showAlertManager, setShowAlertManager] = useState(false);
+    const [showAlertDialog, setShowAlertDialog] = useState(false);
+    const [alertTargetSymbol, setAlertTargetSymbol] = useState('');
+    const [triggeredAlertCount, setTriggeredAlertCount] = useState(0);
+    const [alertMap, setAlertMap] = useState<Record<string, StockAlert>>({});
+
+    const refreshAlerts = async () => {
+        try {
+            const all = await fetchAlerts();
+            const triggered = all.filter(a => a.is_active && a.triggered).length;
+            setTriggeredAlertCount(triggered);
+
+            const map: Record<string, StockAlert> = {};
+            all.forEach(a => {
+                if (a.is_active) map[a.symbol] = a;
+            });
+            setAlertMap(map);
+        } catch (e) { console.error("Failed to fetch alerts", e); }
+    };
+
+    useEffect(() => {
+        refreshAlerts();
+    }, []);
     const [loading, setLoading] = useState(false);
     const [sortConfig, setSortConfig] = useState<{ key: keyof Stock; direction: 'asc' | 'desc' } | null>(null);
     const [activeTab, setActiveTab] = useState<'stock' | 'index'>('stock');
@@ -87,7 +154,7 @@ export default function Dashboard() {
     const [importStatus, setImportStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
     // Filter
-    const [filterMode, setFilterMode] = useState<'all' | 'holding' | 'past' | 'trending' | 'notes' | 'star' | 'doubleCircle' | 'circle'>('all');
+    const [filterMode, setFilterMode] = useState<'all' | 'holding' | 'past' | 'trending' | 'notes' | 'star' | 'doubleCircle' | 'circle' | 'buyCandidate'>('all');
     const [selectedViewId, setSelectedViewId] = useState<string>("");
     const [isTradingOpen, setIsTradingOpen] = useState(false);
     const [tradingSymbol, setTradingSymbol] = useState('');
@@ -116,14 +183,20 @@ export default function Dashboard() {
     const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
     const [editingNoteValue, setEditingNoteValue] = useState('');
 
+
     // Chart Hover State
     const [hoveredChartStock, setHoveredChartStock] = useState<Stock | null>(null);
     const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+    // Toast State
+    const [toastMsg, setToastMsg] = useState('');
+    // Alert Dialog Initial Condition
+    const [initialAlertCondition, setInitialAlertCondition] = useState<AlertCondition | undefined>(undefined);
+
+
 
     // Initial Data Load
     useEffect(() => {
-        // Restore from localStorage if URL is clean (empty params)
         // Restore from localStorage if URL is clean (empty params)
         const paramCount = Array.from(searchParams.keys()).length;
 
@@ -151,8 +224,6 @@ export default function Dashboard() {
         const sortKey = searchParams.get('sort');
         const sortOrder = searchParams.get('order');
         if (sortKey) {
-            // Simple object comparison is hard, but usually fine to just set.
-            // Or check if changed. For now, setter is likely fine if effect doesn't run often.
             setSortConfig({ key: sortKey as any, direction: (sortOrder as any) || 'asc' });
         }
 
@@ -167,7 +238,6 @@ export default function Dashboard() {
         if (adv) {
             try {
                 const parsed = JSON.parse(adv);
-                // Deep compare is expensive, JSON string compare is easy
                 if (JSON.stringify(activeCriteria) !== adv) {
                     setActiveCriteria(parsed);
                 }
@@ -176,8 +246,6 @@ export default function Dashboard() {
 
         loadStocks();
 
-        // const interval = setInterval(loadStocks, 30000); // Poll every 30s
-        // return () => clearInterval(interval);
     }, [searchParams.toString(), pathname, router]);
 
     useEffect(() => {
@@ -234,17 +302,14 @@ export default function Dashboard() {
     // Save column filters
     useEffect(() => {
         if (areSettingsLoaded) {
-            // Only save if not empty object? Or save empty to clear?
-            // If empty, removing might be cleaner but saving "{}" is fine.
             localStorage.setItem('dashboardColumnFilters', JSON.stringify(columnFilters));
         }
     }, [columnFilters, areSettingsLoaded]);
-
-    async function loadStocks() {
-        setLoading(true);
+    async function loadStocks(silent: boolean = false) {
+        if (!silent) setLoading(true);
         const targetTab = activeTab; // Capture fetch scope
         try {
-            const data = await fetchStocks(0, 2000, targetTab); // Added limit and offset and asset_type
+            const data = await fetchStocks(0, 2000, targetTab, showHiddenOnly); // Pass showHiddenOnly
 
             // Guard: Only update if we are still on the same tab
             if (activeTabRef.current === targetTab) {
@@ -254,10 +319,12 @@ export default function Dashboard() {
             console.error(e);
         } finally {
             if (activeTabRef.current === targetTab) {
-                setLoading(false);
+                if (!silent) setLoading(false);
             }
         }
     }
+
+
 
     async function handleAddIndex() {
         if (!indexSymbol) return;
@@ -281,9 +348,16 @@ export default function Dashboard() {
 
         try {
             setImportStatus('loading');
-            await triggerImport([path]);
+            const res = await triggerImport([path]);
             await loadStocks(); // Refresh data
             setImportStatus('success');
+
+            if (res.added_stocks && res.added_stocks.length > 0) {
+                alert(`インポートが完了しました。\n${res.added_stocks.length} 件の新規銘柄が追加されました:\n${res.added_stocks.join(', ')}`);
+            } else {
+                setToastMsg('インポートが完了しました (新規追加なし)');
+            }
+
             setTimeout(() => setImportStatus('idle'), 3000);
         } catch (e) {
             setImportStatus('error');
@@ -316,6 +390,8 @@ export default function Dashboard() {
             setEditingNoteId(null);
         }
     };
+
+
 
     // Chart Hover Handlers
     const handleChartEnter = (stock: Stock) => {
@@ -359,6 +435,11 @@ export default function Dashboard() {
         router.replace(`${pathname}?${queryString}`);
     };
 
+    const handleRefresh = () => {
+        loadStocks();
+        refreshAlerts();
+    };
+
     const handleTabChange = (tab: 'stock' | 'index') => {
         setStocks([]); // Clear data to avoid showing stale table content
         setActiveTab(tab);
@@ -385,7 +466,7 @@ export default function Dashboard() {
         updateUrl({ q: null });
     };
 
-    const handleFilterChange = (mode: 'all' | 'holding' | 'past' | 'trending' | 'notes' | 'star' | 'doubleCircle' | 'circle') => {
+    const handleFilterChange = (mode: 'all' | 'holding' | 'past' | 'trending' | 'notes' | 'star' | 'doubleCircle' | 'circle' | 'buyCandidate') => {
         const newMode = filterMode === mode ? 'all' : mode;
         setFilterMode(newMode);
         updateUrl({ filter: newMode === 'all' ? null : newMode });
@@ -404,10 +485,18 @@ export default function Dashboard() {
             updateUrl({ adv: null });
         }
     };
+    // Column Resize Handler
+    const handleColumnResize = (key: string, width: number) => {
+        // We'll update the column width in INITIAL_COLUMNS (requires state or memo update if we want persistence but memo is computed)
+        // For now, simpler implementation:
+        // Actually INITIAL_COLUMNS is memoized. We might need a state for column definitions if we want them resizable.
+        // But for "Manager", we likely just want the labels.
+        // Let's just use INITIAL_COLUMNS for finding labels.
+    };
 
-    const handleClearAdvancedFilter = () => {
-        setActiveCriteria(null);
-        updateUrl({ adv: null });
+    const getColumnLabel = (key: string) => {
+        const col = INITIAL_COLUMNS.find(c => c.key === key);
+        return col?.label || key;
     };
 
     const handleExportExcel = async () => {
@@ -416,12 +505,12 @@ export default function Dashboard() {
         const cols = visibleColumns
             .filter(key => key !== 'daily_chart_data' && key !== 'daily_chart_data_large')
             .map(key => {
-                const def = ALL_COLUMNS.find(c => c.key === key);
+                const def = INITIAL_COLUMNS.find(c => c.key === key);
                 let type: 'string' | 'number' | 'percentage' | 'date' = 'string';
 
                 if (key.includes('percentage') || key.includes('deviation_')) {
                     type = 'percentage';
-                } else if (['current_price', 'market_cap', 'realized_pl', 'composite_rating', 'rs_rating'].includes(key)) {
+                } else if (['current_price', 'market_cap', 'realized_pl', 'composite_rating', 'rs_rating', 'slope_5ma', 'slope_20ma', 'slope_50ma', 'slope_200ma'].includes(key)) {
                     type = 'number';
                 } else if (key.includes('date') || key.includes('updated_at')) {
                     type = 'date';
@@ -489,7 +578,9 @@ export default function Dashboard() {
                 const q = appliedQuery.toLowerCase();
                 const match = stock.symbol.toLowerCase().includes(q) ||
                     stock.company_name.toLowerCase().includes(q) ||
-                    stock.sector?.toLowerCase().includes(q);
+                    stock.sector?.toLowerCase().includes(q) ||
+                    (stock.note || '').toLowerCase().includes(q) ||
+                    (stock.latest_analysis || '').toLowerCase().includes(q);
                 if (!match) return false;
             }
 
@@ -507,11 +598,13 @@ export default function Dashboard() {
             } else if (filterMode === 'notes') {
                 if (!stock.note) return false;
             } else if (filterMode === 'star') {
-                if (!stock.latest_analysis?.includes('★')) return false;
+                if (!stock.is_buy_candidate) return false;
             } else if (filterMode === 'doubleCircle') {
-                if (!stock.latest_analysis?.includes('◎')) return false;
+                if (!((stock.composite_rating || 0) >= 95)) return false;
             } else if (filterMode === 'circle') {
-                if (!stock.latest_analysis?.includes('○')) return false;
+                if (!((stock.composite_rating || 0) >= 80 && (stock.composite_rating || 0) < 95)) return false;
+            } else if (filterMode === 'buyCandidate') {
+                if (!(stock.is_buy_candidate === true)) return false;
             }
 
             // 4. Advanced Filters
@@ -551,9 +644,31 @@ export default function Dashboard() {
                     if (filterVal.max !== undefined && numVal > filterVal.max) return false;
                 }
 
+                // Text Filter
+                if (filterVal.type === 'text' && filterVal.text) {
+                    // Map virtual columns to actual data properties
+                    const dataKey = key === 'note_multiline' ? 'note' : key;
+                    const val = String((stock as any)[dataKey] || '').toLowerCase();
+                    if (!val.includes(filterVal.text.toLowerCase())) return false;
+                }
+
                 // Select Filter
                 if ('selected' in filterVal && filterVal.selected) { // check if selected exists
-                    if (filterVal.selected.length > 0 && !filterVal.selected.includes(String(val))) return false;
+                    if (filterVal.selected.length > 0) {
+                        // Check if current value matches any selected
+                        // Special handling for (空白)
+                        const hasEmptySelection = filterVal.selected.includes('(空白)');
+                        const valStr = String(val || '');
+
+                        let match = false;
+                        if (hasEmptySelection && (!val || valStr.trim() === '')) {
+                            match = true;
+                        } else if (filterVal.selected.includes(valStr)) {
+                            match = true;
+                        }
+
+                        if (!match) return false;
+                    }
                 }
 
                 // Date Range Filter
@@ -606,12 +721,61 @@ export default function Dashboard() {
         currentPage * ITEMS_PER_PAGE
     );
 
+    // Batch Gemini Run
+    const handleBatchGeminiRun = async () => {
+        if (!selectedBatchPromptId) return;
+        const promptTemplate = prompts.find(p => p.id == selectedBatchPromptId)?.content;
+        if (!promptTemplate) return;
+
+        // Use filtered stocks as targets
+        const targets = filteredStocks;
+
+        abortBatchRef.current = false;
+        setBatchProgress({ current: 0, total: targets.length, status: 'running', message: 'Starting...', detail: '' });
+
+        let successCount = 0;
+        let failCount = 0;
+
+        for (let i = 0; i < targets.length; i++) {
+            if (abortBatchRef.current) {
+                setBatchProgress(prev => ({ ...prev, status: 'paused', message: 'Cancelled' }));
+                break;
+            }
+            const stock = targets[i];
+
+            setBatchProgress({
+                current: i + 1,
+                total: targets.length,
+                status: 'running',
+                message: `Processing ${stock.symbol}...`,
+                detail: stock.company_name
+            });
+
+            try {
+                const prompt = promptTemplate.replace('%COMPANYNAME%', stock.company_name || stock.symbol);
+                const text = await generateText(prompt);
+                if (text) {
+                    await saveStockNote(stock.symbol, text);
+                    setStocks(prev => prev.map(s => s.symbol === stock.symbol ? { ...s, note: text } : s));
+                    successCount++;
+                }
+            } catch (e) {
+                console.error(`Failed to generate for ${stock.symbol}`, e);
+                failCount++;
+            }
+
+            // Small delay
+            await new Promise(r => setTimeout(r, 1000));
+        }
+        setBatchProgress(prev => ({ ...prev, status: 'complete', message: `Completed. Success: ${successCount}, Failed: ${failCount}`, detail: '' }));
+    };
+
     // Reset page when filter changes
     useEffect(() => {
         setCurrentPage(1);
     }, [totalPages]);
 
-    const [toastMsg, setToastMsg] = useState('');
+
 
     const handleAddResearch = (symbol: string) => {
         addResearchTicker(symbol);
@@ -636,6 +800,26 @@ export default function Dashboard() {
 
     const renderCell = (stock: Stock, key: string) => {
         switch (key) {
+            case 'is_buy_candidate':
+                return (
+                    <button
+                        onClick={async (e) => {
+                            e.stopPropagation();
+                            const newValue = !stock.is_buy_candidate;
+                            try {
+                                await updateStock(stock.symbol, { is_buy_candidate: newValue });
+                                // Optimistic update or refresh
+                                setStocks(prev => prev.map(s => s.symbol === stock.symbol ? { ...s, is_buy_candidate: newValue } : s));
+                            } catch (error) {
+                                console.error("Failed to update buy mark", error);
+                            }
+                        }}
+                        className={`text-lg focus:outline-none transition-colors ${stock.is_buy_candidate ? 'text-yellow-400 drop-shadow-md' : 'text-gray-700 hover:text-gray-500'}`}
+                        title={stock.is_buy_candidate ? "Remove Buy Candidate" : "Mark as Buy Candidate"}
+                    >
+                        {stock.is_buy_candidate ? '★' : '☆'}
+                    </button>
+                );
             case 'symbol':
                 return (
                     <div className="flex items-center gap-2">
@@ -657,6 +841,10 @@ export default function Dashboard() {
                         </button>
                         */}
                         <div className="flex gap-1">
+                            {/* Base Formation Badge (Icon) */}
+                            {stock.signal_base_formation === 1 && (
+                                <span title="Base Formation (Tight Area)" className="cursor-help">🧱</span>
+                            )}
                             <a
                                 href={`https://research.investors.com/ibdchartsenlarged.aspx?symbol=${stock.symbol}`}
                                 target="_blank"
@@ -688,8 +876,26 @@ export default function Dashboard() {
                             >
                                 <span className="text-lg leading-none">🧠</span>
                             </button>
+                            {/* Alert Icon (Conditional) */}
+                            {alertMap[stock.symbol] && (
+                                <Link
+                                    href="/alerts"
+                                    className="flex items-center text-gray-400 hover:text-white group relative ml-1"
+                                    title={t('alert') || 'Alert'}
+                                >
+                                    <div className="w-5 h-5 flex items-center justify-center rounded-full group-hover:bg-gray-800 transition relative">
+                                        🔔
+                                        {alertMap[stock.symbol].triggered && (
+                                            <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                                            </span>
+                                        )}
+                                    </div>
+                                </Link>
+                            )}
                         </div>
-                    </div>
+                    </div >
                 );
 
             case 'sector':
@@ -731,6 +937,39 @@ export default function Dashboard() {
                     </div>
                 );
 
+            case 'note_multiline':
+                if (editingNoteId === stock.symbol) {
+                    return (
+                        <textarea
+                            value={editingNoteValue}
+                            onChange={(e) => setEditingNoteValue(e.target.value)}
+                            onBlur={() => handleNoteSave(stock.symbol)}
+                            onKeyDown={(e) => {
+                                // Shift+Enter for newline, Enter to save
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    handleNoteSave(stock.symbol);
+                                }
+                            }}
+                            autoFocus
+                            className="bg-gray-700 text-white p-1 rounded w-full h-28 border border-blue-500 outline-none text-sm"
+                            onClick={(e) => e.stopPropagation()}
+                        />
+                    );
+                }
+                return (
+                    <div
+                        onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            handleNoteDoubleClick(stock);
+                        }}
+                        className="cursor-text h-28 overflow-y-auto whitespace-pre-wrap text-sm hover:bg-gray-800/50 rounded px-1 transition border border-gray-800/50"
+                        title={stock.note}
+                    >
+                        {stock.note || null}
+                    </div>
+                );
+
             case 'status':
                 let color = 'bg-gray-700 text-gray-300';
                 let label = '';
@@ -758,23 +997,11 @@ export default function Dashboard() {
 
             case 'composite_rating':
                 const crVal = stock[key as keyof Stock];
-                const cr = Number(crVal);
-                let crClass = 'text-gray-500 font-mono';
-                if (cr >= 95) crClass = 'text-yellow-400 font-bold font-mono'; // Elite
-                else if (cr >= 90) crClass = 'text-yellow-500 font-bold font-mono';
-                else if (cr >= 80) crClass = 'text-green-400 font-mono';
-                else if (cr >= 70) crClass = 'text-yellow-600 font-mono';
-                return <span className={crClass}>{crVal || '-'}</span>;
+                return <span className={getRatingColor(Number(crVal))}>{crVal || '-'}</span>;
 
             case 'rs_rating':
                 const rsVal = stock[key as keyof Stock];
-                const rs = Number(rsVal);
-                let rsClass = 'text-gray-500 font-mono';
-                if (rs >= 95) rsClass = 'text-blue-300 font-bold font-mono'; // Elite
-                else if (rs >= 90) rsClass = 'text-blue-400 font-bold font-mono';
-                else if (rs >= 80) rsClass = 'text-green-400 font-mono';
-                else if (rs >= 70) rsClass = 'text-yellow-600 font-mono';
-                return <span className={rsClass}>{rsVal || '-'}</span>;
+                return <span className={getRatingColor(Number(rsVal))}>{rsVal || '-'}</span>;
 
             case 'change_percentage_1d':
             case 'change_percentage_5d':
@@ -798,7 +1025,26 @@ export default function Dashboard() {
                 if (pl === undefined || pl === null || pl === 0) return null;
                 return (
                     <div className={`text-right font-mono ${pl > 0 ? 'text-red-400' : pl < 0 ? 'text-blue-400' : 'text-gray-500'}`}>
-                        {pl.toFixed(2)}
+                        {pl > 0 ? '+' : ''}{Math.round(pl).toLocaleString()}
+                    </div>
+                );
+
+            case 'predicted_price_today':
+            case 'predicted_price_next':
+                const predVal = stock[key as keyof Stock] as number | undefined | null;
+                if (predVal === undefined || predVal === null) {
+                    return <div className="text-right text-gray-600 font-mono">-</div>;
+                }
+
+                let predColor = 'text-white'; // Default equal
+                if (stock.current_price !== undefined && stock.current_price !== null) {
+                    if (predVal > stock.current_price) predColor = 'text-red-400';
+                    else if (predVal < stock.current_price) predColor = 'text-blue-400';
+                }
+
+                return (
+                    <div className={`text-right font-mono ${predColor}`}>
+                        {predVal.toFixed(2)}
                     </div>
                 );
 
@@ -858,240 +1104,284 @@ export default function Dashboard() {
                     <div className="text-right">-</div>
                 );
 
+            case 'signal_base_formation':
+                return stock.signal_base_formation ? (
+                    <div className="flex justify-center">
+                        <span className="inline-block px-2 py-0.5 bg-indigo-900 border border-indigo-700 text-indigo-300 rounded text-xs font-bold shadow-[0_0_10px_rgba(99,102,241,0.3)] animate-pulse">
+                            BASE
+                        </span>
+                    </div>
+                ) : null;
+
             default:
                 const v = stock[key as keyof Stock];
                 return v !== undefined && v !== null ? String(v) : '-';
         }
     };
 
+    // Focus Refresh (Buy Mark Sync Fix)
+    useEffect(() => {
+        const handleFocus = () => {
+            // Refresh data when window gains focus
+            loadStocks(true); // silent refresh
+            refreshAlerts();
+        };
+        window.addEventListener('focus', handleFocus);
+        return () => window.removeEventListener('focus', handleFocus);
+    }, [activeTab, sortConfig, currentPage, searchQuery, filterMode, appliedQuery]);
+
+    // Derived Activity State
+    const isBackgroundActive = loading || importStatus === 'loading' || (batchProgress && batchProgress.status === 'running') || false;
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+    // Close menu when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            const target = event.target as HTMLElement;
+            if (isMenuOpen && !target.closest('.menu-container')) {
+                setIsMenuOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isMenuOpen]);
+
     return (
         <div className="min-h-screen bg-black text-gray-200 font-sans cursor-default" onKeyDown={handleGlobalKeyDown} tabIndex={-1}>
             {/* Header */}
-            <header className="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-900/50 sticky top-0 z-10 backdrop-blur">
-                <div className="flex items-center gap-4">
-                    <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                        {t('dashboardTitle')}
-                    </h1>
-                    <div className="flex gap-2">
+            <div className="flex justify-between items-center mb-8">
+                <h1 className="text-3xl font-bold flex items-center gap-4">
+                    <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
+                        {t('dashboard')}
+                    </span>
+                    {/* Tab Switcher */}
+                    <div className="flex bg-gray-800 rounded-lg p-1 border border-gray-700 ml-4">
                         <button
                             onClick={() => handleTabChange('stock')}
-                            className={`px-3 py-1 rounded text-sm font-bold transition ${activeTab === 'stock' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-white'}`}
+                            className={`px-4 py-1 rounded-md text-sm font-bold transition-all ${activeTab === 'stock' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
                         >
-                            株式
+                            Stock
                         </button>
                         <button
                             onClick={() => handleTabChange('index')}
-                            className={`px-3 py-1 rounded text-sm font-bold transition ${activeTab === 'index' ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-white'}`}
+                            className={`px-4 py-1 rounded-md text-sm font-bold transition-all ${activeTab === 'index' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
                         >
-                            指数
+                            Index
                         </button>
-                        <Link
-                            href="/heatmap"
-                            className="px-3 py-1 rounded text-sm font-bold text-gray-500 hover:text-white transition flex items-center gap-1"
-                        >
-                            ヒートマップ
-                        </Link>
-                        <Link
-                            href="/history"
-                            className="px-3 py-1 rounded text-sm font-bold text-gray-500 hover:text-white transition flex items-center gap-1"
-                        >
-                            History
-                        </Link>          </div>
-                </div>
-
-                <div className="flex items-center gap-4">
-                    {/* Deep Research Link (Restored) */}
-                    <div className="flex items-center gap-2">
-                        {/* Index Adder (Only for Index tab) */}
-                        {activeTab === 'index' && (
-                            <div className="flex items-center gap-1 mr-2">
-                                <input
-                                    type="text"
-                                    value={indexSymbol}
-                                    onChange={e => setIndexSymbol(e.target.value.toUpperCase())}
-                                    placeholder="指数コード"
-                                    className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white uppercase w-20"
-                                />
-                                <button
-                                    onClick={handleAddIndex}
-                                    className="bg-green-700 hover:bg-green-600 text-white rounded px-2 py-1 text-xs"
-                                >
-                                    +
-                                </button>
-                            </div>
-                        )}
-                        {msg && <span className="text-xs text-green-400 animate-pulse mr-2">{msg}</span>}
-
-                        <Link
-                            href="/deep-research"
-                            className="flex items-center gap-2 bg-purple-700 hover:bg-purple-600 text-white px-3 py-1.5 rounded shadow shadow-purple-900/50 transition font-bold text-sm"
-                        >
-                            <span>🧠</span>
-                            <span>{t('deepResearchTitle') || 'Deep Research'}</span>
-                        </Link>
-
-                        <Link
-                            href="/historical-analysis"
-                            className="flex items-center gap-2 bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1.5 rounded shadow shadow-indigo-900/50 transition font-bold text-sm"
-                        >
-                            <span>📈</span>
-                            <span>ヒストリカル</span>
-                        </Link>
                     </div>
+                </h1>
+                <div className="flex items-center gap-4">
+                    {/* Activity Indicator */}
+                    {isBackgroundActive && (
+                        <div className="flex items-center gap-2 px-3 py-1 bg-gray-900 rounded-full border border-blue-900/50 animate-pulse">
+                            <div className="w-2 h-2 bg-blue-500 rounded-full animate-spin"></div>
+                            <span className="text-xs text-blue-400 font-mono">処理中...</span>
+                        </div>
+                    )}
 
-                    {/* AI Analysis Folder Button (Restored) */}
-                    {/* AI Analysis (Reload Reports) */}
-                    <button
-                        onClick={async () => {
-                            await loadStocks();
-                            alert(t('reportsUpdated') || "Reports updated");
-                        }}
-                        disabled={loading}
-                        className="flex items-center gap-2 bg-blue-700 hover:bg-blue-600 text-white px-3 py-1.5 rounded shadow shadow-blue-900/50 transition font-bold text-sm"
-                        title="Reload AI Reports for All Stocks"
-                    >
-                        <span>🔄</span>
-                        <span>AI分析(更新)</span>
-                    </button>
-
-                    {/* Export Button */}
-                    <button
-                        onClick={handleExportExcel}
-                        className="flex items-center gap-2 bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded shadow shadow-green-900/50 transition font-bold text-sm"
-                        title="Export to Excel"
-                    >
-                        <span>📊</span>
-                        <span>Excel</span>
-                    </button>
-
-                    {/* Import Button (Moved here) */}
-                    <button
-                        onClick={handleImport}
-                        disabled={importStatus === 'loading'}
-                        className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-sm font-bold shadow shadow-blue-900/50 transition-all disabled:opacity-50 flex items-center gap-2"
-                    >
-                        {importStatus === 'loading' ? (
-                            <span className="animate-spin">↻</span>
-                        ) : (
-                            <span>📥</span>
-                        )}
-                        {importStatus === 'loading' ? t('importing') : t('runImport')}
-                    </button>
-                    {importStatus === 'success' && <span className="text-green-500 text-sm">✓</span>}
-                    {importStatus === 'error' && <span className="text-red-500 text-sm">✕</span>}
-
-                    {/* System Status */}
                     <SystemStatusBanner />
 
+                    {/* Alert Toggle Button */}
+                    <button
+                        onClick={() => router.push('/alerts')}
+                        className={`p-2 rounded-lg border transition-colors relative ${triggeredAlertCount > 0 ? 'bg-gray-700 text-yellow-400 border-yellow-500/50' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}
+                        title="Alerts"
+                    >
+                        🔔
+                        {triggeredAlertCount > 0 && (
+                            <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                            </span>
+                        )}
+                    </button>
+
+                    {/* Menu Button */}
+                    <div className="relative menu-container">
+                        <button
+                            onClick={() => setIsMenuOpen(!isMenuOpen)}
+                            className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-bold shadow-lg transition-all flex items-center gap-2 border border-gray-700"
+                        >
+                            <span className="text-xl">≡</span>
+                        </button>
+
+                        {/* Dropdown Menu */}
+                        {isMenuOpen && (
+                            <div className="absolute right-0 top-full mt-2 w-56 bg-gray-800 border border-gray-700 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100 origin-top-right">
+                                <div className="p-2 space-y-1">
+                                    <button
+                                        onClick={() => { setIsMenuOpen(false); handleRefresh(); }}
+                                        className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-sm text-gray-200 flex items-center gap-2 transition"
+                                    >
+                                        <span>🔄</span> {t('refresh')}
+                                    </button>
+                                    <button
+                                        onClick={() => { setIsMenuOpen(false); document.getElementById('import-file-menu')?.click(); }}
+                                        className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-sm text-gray-200 flex items-center gap-2 transition"
+                                    >
+                                        <span>📥</span> {t('import')}
+                                    </button>
+                                    <button
+                                        onClick={() => { setIsMenuOpen(false); setShowBatchDialog(true); }}
+                                        className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-sm text-gray-200 flex items-center gap-2 transition"
+                                    >
+                                        <span>⚡</span> Gemini一括分析
+                                    </button>
+                                    <div className="h-px bg-gray-700 my-1"></div>
+                                    <button
+                                        onClick={() => { setIsMenuOpen(false); handleExportExcel(); }}
+                                        className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-sm text-gray-200 flex items-center gap-2 transition"
+                                    >
+                                        <span>📤</span> Excelエクスポート
+                                    </button>
+                                    <div className="h-px bg-gray-700 my-1"></div>
+                                    <button
+                                        onClick={() => { setIsMenuOpen(false); router.push('/deep-research'); }}
+                                        className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-sm text-gray-200 flex items-center gap-2 transition"
+                                    >
+                                        <span>🧠</span> ディープリサーチ
+                                    </button>
+                                    <button
+                                        onClick={() => { setIsMenuOpen(false); router.push('/historical-analysis'); }}
+                                        className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-sm text-gray-200 flex items-center gap-2 transition"
+                                    >
+                                        <span>📈</span> 過去検証
+                                    </button>
+                                    <div className="h-px bg-gray-700 my-1"></div>
+                                    <button
+                                        onClick={() => { setIsMenuOpen(false); router.push('/settings'); }}
+                                        className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-sm text-gray-200 flex items-center gap-2 transition"
+                                    >
+                                        <span>⚙️</span> {t('settings')}
+                                    </button>
+                                </div>
+                                {/* Hidden File Input for Menu */}
+                                <input
+                                    id="import-file-menu"
+                                    type="file"
+                                    accept=".csv"
+                                    className="hidden"
+                                    onChange={handleImport}
+                                />
+                            </div>
+                        )}
+                    </div>
                 </div>
-            </header >
+            </div>
 
             {/* Main Content */}
-            < main className="p-4" >
-                {/* Controls Bar */}
-                < div className="flex flex-wrap gap-4 items-end mb-6 bg-gray-900 p-4 rounded-lg border border-gray-800" >
-                    {/* Search */}
-                    < div className="flex-1 min-w-[300px] flex gap-2" >
-                        {/* Ticker Navigation (New) */}
-                        < div >
-                            <label className="text-xs uppercase font-bold text-gray-500 mb-1 block tracking-wider">コード</label>
-                            <input
-                                type="text"
-                                placeholder="W"
-                                className="w-16 bg-black border border-gray-700 rounded px-2 py-2 text-white text-center font-bold font-mono focus:border-blue-500 outline-none uppercase"
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                        const val = e.currentTarget.value.trim().toUpperCase();
-                                        if (val) router.push(`/stocks/${val}`);
+            <main className="p-4">
+                {/* Controls & Filter Bar */}
+                <div className="flex flex-wrap gap-4 mb-6 items-center bg-gray-900/50 p-4 rounded-xl border border-gray-800 backdrop-blur-sm">
+                    <div className="relative">
+                        <input
+                            type="text"
+                            placeholder={t('searchPlaceholder' as any) || "銘柄、名前、メモを検索..."}
+                            className="bg-gray-800 border border-gray-700 text-white rounded-lg px-4 py-2 pl-10 focus:outline-none focus:border-blue-500 w-64 transition-all"
+                            value={searchQuery}
+                            onChange={(e) => handleSearchChange(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                        />
+                        <span className="absolute left-3 top-2.5 text-gray-500">🔍</span>
+                        {searchQuery && (
+                            <button onClick={handleClearSearch} className="absolute right-3 top-2.5 text-gray-500 hover:text-white text-xs">✕</button>
+                        )}
+                    </div>
+
+                    <div className="h-8 w-px bg-gray-700 mx-2"></div>
+
+                    {/* Ticker Jump Input */}
+                    <div className="relative">
+                        <input
+                            type="text"
+                            placeholder="銘柄コードへ移動..."
+                            className="bg-gray-800 border border-gray-700 text-white rounded-lg px-4 py-2 pl-9 focus:outline-none focus:border-green-500 w-40 transition-all font-mono"
+                            onKeyDown={(e) => {
+                                e.stopPropagation(); // Stop global listeners
+                                if (e.key === 'Enter') {
+                                    const val = e.currentTarget.value.trim().toUpperCase();
+                                    if (val) {
+                                        router.push(`/stocks/${val}`);
                                     }
-                                }}
-                            />
-                        </div >
+                                }
+                            }}
+                        />
+                        <span className="absolute left-3 top-2.5 text-gray-500">🚀</span>
+                    </div>
 
-                        <div className="flex-1">
-                            <label className="text-xs uppercase font-bold text-gray-500 mb-1 block tracking-wider">検索</label>
-                            <div className="relative">
-                                <input
-                                    type="text"
-                                    value={searchQuery}
-                                    onChange={(e) => handleSearchChange(e.target.value)}
-                                    onKeyDown={handleKeyDown}
-                                    placeholder={t('searchPlaceholder').toString()}
-                                    className="w-full bg-black border border-gray-700 rounded px-4 py-2 text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition"
-                                />
-                                {searchQuery && (
-                                    <button
-                                        onClick={handleClearSearch}
-                                        className="absolute right-3 top-2.5 text-gray-500 hover:text-white"
-                                    >
-                                        ✕
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    </div >
+                    <div className="h-8 w-px bg-gray-700 mx-2"></div>
 
-                    {/* Quick Filters */}
-                    < div >
-                        <label className="text-xs uppercase font-bold text-gray-500 mb-1 block tracking-wider">フィルタ</label>
-                        <div className="flex bg-black rounded p-1 border border-gray-700">
-                            <button onClick={() => handleFilterChange('all')} className={`px-3 py-1 rounded text-sm ${filterMode === 'all' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}>{t('filterAll')}</button>
-                            <button onClick={() => handleFilterChange('holding')} className={`px-3 py-1 rounded text-sm ${filterMode === 'holding' ? 'bg-green-900 text-green-100' : 'text-gray-400 hover:text-white'}`}>{t('filterHolding')}</button>
-                            <button onClick={() => handleFilterChange('past')} className={`px-3 py-1 rounded text-sm ${filterMode === 'past' ? 'bg-blue-900 text-blue-100' : 'text-gray-400 hover:text-white'}`}>{t('filterPast')}</button>
-                            <button onClick={() => handleFilterChange('trending')} className={`px-3 py-1 rounded text-sm ${filterMode === 'trending' ? 'bg-purple-900 text-purple-100' : 'text-gray-400 hover:text-white'}`}>{t('filterTrending')}</button>
-                            <button onClick={() => handleFilterChange('notes')} className={`px-3 py-1 rounded text-sm ${filterMode === 'notes' ? 'bg-yellow-900 text-yellow-100' : 'text-gray-400 hover:text-white'}`}>{t('filterNotes')}</button>
-                            <button onClick={() => handleFilterChange('star')} className={`px-3 py-1 rounded text-sm ${filterMode === 'star' ? 'bg-yellow-600 text-black' : 'text-gray-400 hover:text-white'}`}>★</button>
-                            <button onClick={() => handleFilterChange('doubleCircle')} className={`px-3 py-1 rounded text-sm ${filterMode === 'doubleCircle' ? 'bg-red-600 text-white' : 'text-gray-400 hover:text-white'}`}>◎</button>
-                            <button onClick={() => handleFilterChange('circle')} className={`px-3 py-1 rounded text-sm ${filterMode === 'circle' ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'}`}>○</button>
-                        </div>
-                    </div >
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => handleFilterChange('all')}
+                            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${filterMode === 'all'
+                                ? 'bg-gray-700 text-white shadow-md ring-1 ring-gray-600'
+                                : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                                }`}
+                        >
+                            {t('all')}
+                        </button>
+                        <button
+                            onClick={() => handleFilterChange('holding')}
+                            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${filterMode === 'holding'
+                                ? 'bg-blue-900/50 text-blue-400 shadow-md ring-1 ring-blue-700'
+                                : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                                }`}
+                        >
+                            {t('holding')} ({stocks.filter(s => s.status === 'Holding').length})
+                        </button>
+                        <button
+                            onClick={() => handleFilterChange('past')}
+                            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${filterMode === 'past'
+                                ? 'bg-gray-700 text-gray-300 shadow-md ring-1 ring-gray-600'
+                                : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                                }`}
+                        >
+                            {t('pastTrade')}
+                        </button>
+                        {/* Star Filter */}
+                        <button
+                            onClick={() => handleFilterChange('star')}
+                            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-1 ${filterMode === 'star'
+                                ? 'bg-yellow-900/50 text-yellow-400 shadow-md ring-1 ring-yellow-700'
+                                : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                                }`}
+                        >
+                            <span>★</span>
+                        </button>
+                    </div>
 
-
-
-                    {/* Filter Select (Advanced Settings embedded) + Saved Views */}
-                    < div className="flex items-center gap-2" >
-                        <div className="flex flex-col">
-                            <label className="text-xs uppercase font-bold text-gray-500 mb-1 block tracking-wider">設定</label>
-                            <FilterSelect
-                                onSelect={(criteria) => {
-                                    if (criteria) handleApplyAdvancedFilter(criteria);
-                                    else {
-                                        setActiveCriteria(null);
-                                        setFilterMode('all');
-                                    }
-                                }}
-                                currentCriteria={activeCriteria}
-                                onOpenDialog={() => setIsFilterDialogOpen(true)}
-                                refreshKey={isFilterDialogOpen ? 1 : 0} // simple trigger to reload list if saved
-                            />
-                            <FilterDialog // Render Dialog here since we removed the block
-                                isOpen={isFilterDialogOpen}
-                                onClose={() => setIsFilterDialogOpen(false)}
-                                onApply={handleApplyAdvancedFilter}
-                                initialCriteria={activeCriteria || undefined}
-                            />
-                        </div>
-                    </div >
+                    {/* Filter List & Advanced Filter */}
+                    <div className="flex items-center gap-2">
+                        <FilterSelect
+                            onSelect={(criteria) => {
+                                if (criteria) handleApplyAdvancedFilter(criteria);
+                                else {
+                                    setActiveCriteria(null);
+                                    setFilterMode(filterMode === 'all' ? 'all' : filterMode); // Keep basic filter if any
+                                }
+                            }}
+                            currentCriteria={activeCriteria}
+                            onOpenDialog={() => setIsFilterDialogOpen(true)}
+                            refreshKey={isFilterDialogOpen ? 1 : 0}
+                        />
+                        <FilterDialog
+                            isOpen={isFilterDialogOpen}
+                            onClose={() => setIsFilterDialogOpen(false)}
+                            onApply={handleApplyAdvancedFilter}
+                            initialCriteria={activeCriteria || undefined}
+                        />
+                    </div>
 
                     <ColumnManager
-                        allColumns={ALL_COLUMNS}
+                        allColumns={INITIAL_COLUMNS}
                         visibleColumns={visibleColumns}
                         onUpdateColumns={setVisibleColumns}
                         selectedViewId={selectedViewId}
                         onSelectView={setSelectedViewId}
+                        viewType="dashboard"
                     />
-                </div >
-
-                {/* Active Filter Chips (Simplified: Show only CR/RS, hide detailed signals) */}
-                {
-                    activeCriteria && (
-                        <div className="flex flex-wrap gap-2 mb-4 px-1">
-                            {activeCriteria.min_composite_rating && <span className="text-xs bg-gray-800 border border-gray-600 px-2 py-1 rounded">CR &gt; {activeCriteria.min_composite_rating}</span>}
-                            {activeCriteria.min_rs_rating && <span className="text-xs bg-gray-800 border border-gray-600 px-2 py-1 rounded">RS &gt; {activeCriteria.min_rs_rating}</span>}
-                            {/* Hidden Signals as requested */}
-                        </div>
-                    )
-                }
+                </div>
 
                 {/* Filters Summary */}
                 <div className="text-xs text-gray-500 mb-2 flex justify-between">
@@ -1107,16 +1397,12 @@ export default function Dashboard() {
                         <div className="p-12 text-center text-gray-500 animate-pulse">
                             {t('loading')}
                         </div>
-                    ) : currentStocks.length === 0 ? (
-                        <div className="p-12 text-center text-gray-500">
-                            {t('noStocksFound')}
-                        </div>
                     ) : (
                         <table className="w-full text-sm text-left min-w-max">
                             <thead className="text-xs text-gray-400 uppercase bg-black border-b border-gray-700 sticky top-0 z-20">
                                 <tr>
                                     {visibleColumns.map(colKey => {
-                                        const def = ALL_COLUMNS.find(c => c.key === colKey);
+                                        const def = INITIAL_COLUMNS.find(c => c.key === colKey);
                                         const isNumeric = ['current_price', 'market_cap', 'volume', 'realized_pl', 'composite_rating', 'rs_rating'].includes(colKey) || colKey.includes('percentage') || colKey.includes('deviation_') || colKey === 'volume_increase_pct';
                                         return (
                                             <th key={colKey} className="px-4 py-3 whitespace-nowrap group" style={{ minWidth: def?.width, width: def?.width }}>
@@ -1125,7 +1411,7 @@ export default function Dashboard() {
                                                         className="flex items-center cursor-pointer hover:text-white"
                                                         onClick={() => handleSort(colKey as keyof Stock)}
                                                     >
-                                                        {def?.label}
+                                                        {def?.header || def?.label}
                                                         <SortIcon colKey={colKey as keyof Stock} sortConfig={sortConfig} />
                                                     </div>
                                                     {/* Header Filter Input */}
@@ -1133,15 +1419,18 @@ export default function Dashboard() {
                                                         columnKey={colKey}
                                                         title={def?.label || colKey}
                                                         dataType={
-                                                            ['last_buy_date', 'last_sell_date', 'first_import_date', 'updated_at', 'ibd_rating_date'].includes(colKey) ? 'date' :
-                                                                ['symbol', 'company_name', 'sector', 'industry', 'note', 'status', 'latest_analysis'].includes(colKey) ? 'string' : 'number'
+                                                            ['last_buy_date', 'last_sell_date', 'first_import_date', 'updated_at', 'ibd_rating_date', 'last_earnings_date', 'next_earnings_date'].includes(colKey) ? 'date' :
+                                                                ['symbol', 'company_name', 'sector', 'industry', 'note', 'note_multiline', 'status', 'latest_analysis', 'is_buy_candidate'].includes(colKey) ? 'string' : 'number'
                                                         }
                                                         onApply={(val) => handleColumnFilterChange(colKey, val)}
                                                         currentFilter={columnFilters[colKey]}
+                                                        mode={['note', 'note_multiline', 'latest_analysis'].includes(colKey) ? 'text' : undefined}
                                                         // Unique Value Generation could be expensive for dates, but we don't need it for date range mode
                                                         uniqueValues={
-                                                            ['symbol', 'company_name', 'sector', 'industry', 'note', 'status', 'latest_analysis'].includes(colKey)
-                                                                ? Array.from(new Set(stocks.map(s => String((s as any)[colKey] || '')).filter(Boolean))).sort()
+                                                            ['symbol', 'company_name', 'sector', 'industry', 'status'].includes(colKey)
+                                                                ? (() => {
+                                                                    return Array.from(new Set(stocks.map(s => String((s as any)[colKey] || '')).filter(Boolean))).sort();
+                                                                })()
                                                                 : undefined
                                                         }
                                                     />
@@ -1152,19 +1441,27 @@ export default function Dashboard() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-800">
-                                {currentStocks.map(stock => (
-                                    <tr
-                                        key={stock.symbol}
-                                        className="hover:bg-gray-800/50 transition duration-75 group cursor-pointer"
-                                        onDoubleClick={() => router.push(`/stocks/${stock.symbol}`)}
-                                    >
-                                        {visibleColumns.map(colKey => (
-                                            <td key={colKey} className="px-4 py-2 whitespace-nowrap">
-                                                {renderCell(stock, colKey)}
-                                            </td>
-                                        ))}
+                                {currentStocks.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={visibleColumns.length} className="p-12 text-center text-gray-500">
+                                            {t('noStocksFound')}
+                                        </td>
                                     </tr>
-                                ))}
+                                ) : (
+                                    currentStocks.map(stock => (
+                                        <tr
+                                            key={stock.symbol}
+                                            className="hover:bg-gray-800/50 transition duration-75 group cursor-pointer"
+                                            onDoubleClick={() => router.push(`/stocks/${stock.symbol}`)}
+                                        >
+                                            {visibleColumns.map(colKey => (
+                                                <td key={colKey} className="px-4 py-2 whitespace-nowrap">
+                                                    {renderCell(stock, colKey)}
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    ))
+                                )}
                             </tbody>
                         </table>
                     )}
@@ -1232,6 +1529,81 @@ export default function Dashboard() {
                 onClose={() => setIsTradingOpen(false)}
                 initialSymbol={tradingSymbol}
             />
+            {/* Batch Gemini Dialog */}
+            {
+                showBatchDialog && (
+                    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm">
+                        <div className="bg-gray-800 p-6 rounded-lg w-[500px] border border-gray-700 shadow-xl">
+                            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                                <span>⚡</span> メモ一括生成 (Batch Gemini)
+                            </h2>
+
+                            <p className="text-gray-300 mb-4 text-sm">
+                                現在のリストに表示されている銘柄のうち、<br />
+                                <span className="text-yellow-400 font-bold">メモが空欄</span> の銘柄に対してGeminiを一括実行します。
+                            </p>
+
+                            <div className="mb-6">
+                                <label className="block text-sm text-gray-400 mb-2">使用するプロンプト:</label>
+                                <select
+                                    className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white"
+                                    value={selectedBatchPromptId}
+                                    onChange={e => setSelectedBatchPromptId(e.target.value)}
+                                >
+                                    <option value="" className="bg-gray-900 text-white">選択してください</option>
+                                    {prompts.map(p => (
+                                        <option key={p.id} value={p.id} className="bg-gray-900 text-white">{p.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="flex justify-end gap-3 w-full">
+                                <button
+                                    onClick={() => setShowBatchDialog(false)}
+                                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-gray-300"
+                                >
+                                    キャンセル
+                                </button>
+                                <button
+                                    onClick={handleBatchGeminiRun}
+                                    disabled={!selectedBatchPromptId}
+                                    className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-white font-bold"
+                                >
+                                    実行開始
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+
+            <AlertDialog
+                isOpen={showAlertDialog}
+                onClose={() => {
+                    setShowAlertDialog(false);
+                    setInitialAlertCondition(undefined);
+                }}
+                targetSymbol={alertTargetSymbol}
+                initialCondition={initialAlertCondition}
+                onSuccess={() => {
+                    refreshAlerts();
+                    setAlertTargetSymbol('');
+                    setInitialAlertCondition(undefined);
+                }}
+            />
+
+
+
+            {
+                toastMsg && (
+                    <Toast
+                        message={toastMsg}
+                        onClose={() => setToastMsg('')}
+                    />
+                )
+            }
         </div >
     );
 }
+

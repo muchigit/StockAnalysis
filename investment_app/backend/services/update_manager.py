@@ -170,6 +170,11 @@ class UpdateManager:
                          stock = session.get(Stock, sym)
                          if not stock: continue
                          
+                         if stock.is_hidden:
+                             # print(f"Skipping hidden stock {sym}")
+                             self.progress += 1 # Count as processed
+                             continue
+                         
                          # Data Fetch & Update Logic (From update_price_stats.py)
                          # Use force_refresh=True to ensure we get latest if it's 9:30
                          df = stock_service.get_stock_data(stock.symbol, period='2y', interval='1d', force_refresh=True)
@@ -180,21 +185,25 @@ class UpdateManager:
                          # --- Fundamentals (Market Cap, Earnings) ---
                          # Run this less frequently? Or every time? User requested "Update" so let's do it.
                          try:
-                             print(f"[DEBUG] Fetching fundamentals for {sym}...")
+                             # print(f"[DEBUG] Fetching fundamentals for {sym}...")
                              funds = stock_service.fetch_fundamentals(stock.symbol)
-                             if funds.get('market_cap'):
+                             
+                             if 'market_cap' in funds and funds['market_cap']:
                                  stock.market_cap = funds['market_cap']
-                                 print(f"[DEBUG] {sym} Market Cap: {stock.market_cap}")
-                             if funds.get('next_earnings_date'):
+                                 
+                             # Allow clearing dates if None (to fix stale past dates)
+                             if 'next_earnings_date' in funds:
                                  stock.next_earnings_date = funds['next_earnings_date']
-                             if funds.get('last_earnings_date'):
+                                 
+                             if 'last_earnings_date' in funds:
                                  stock.last_earnings_date = funds['last_earnings_date']
+                                 
                          except Exception as e:
                              print(f"Fundamentals fetch failed for {sym}: {e}")
 
                          # --- Volume & Volume % ---
                          try:
-                             print(f"[DEBUG] Calculating volume for {sym}...")
+                             # print(f"[DEBUG] Calculating volume for {sym}...")
                              # Find last row with valid Volume
                              # df['Volume'] might have NaNs (e.g. today's incomplete data)
                              # We want the last actual trading volume.
@@ -202,7 +211,7 @@ class UpdateManager:
                              if valid_vol_mask.any():
                                  current_volume = df.loc[valid_vol_mask, 'Volume'].iloc[-1]
                                  stock.volume = float(current_volume)
-                                 print(f"[DEBUG] {sym} Volume: {stock.volume}")
+                                 # print(f"[DEBUG] {sym} Volume: {stock.volume}")
                                  
                                  # For increase %, compare with the volume BEFORE the last valid one
                                  # We need the index of the last valid volume
@@ -235,8 +244,6 @@ class UpdateManager:
                          except Exception as e:
                              print(f"Volume calc failed for {sym}: {e}")
                              
-                         # Metadata Backfill (Sector/Industry)
-                         
                          # Metadata Backfill (Sector/Industry)
                          if not stock.sector or not stock.industry:
                              try:
@@ -352,8 +359,34 @@ class UpdateManager:
                          except Exception as e:
                              print(f"Deviation save error {sym}: {e}")
 
-                         # Store Slopes
+                         # Store Slopes & Predictions
                          try:
+                             slope_5ma = None
+                             slope_5ma_prev = None
+                             slope_5ma_prev2 = None
+                             close_minus_4 = None
+                             close_minus_5 = None
+                             
+                             # Helper to safely get value by index
+                             def get_val(series, idx):
+                                 try:
+                                     val = series.iloc[idx]
+                                     if pd.notna(val): return float(val)
+                                 except: pass
+                                 return None
+
+                             if 'Close_MA5' in df.columns:
+                                 ma5 = df['Close_MA5']
+                                 
+                                 if 'Slope_MA5' in df.columns:
+                                     slopes = df['Slope_MA5']
+                                     slope_5ma = get_val(slopes, -1) # T
+                                     slope_5ma_prev = get_val(slopes, -2) # T-1
+                                     slope_5ma_prev2 = get_val(slopes, -3) # T-2
+                                 
+                                 close_minus_4 = get_val(df['Close'], -5) 
+                                 close_minus_5 = get_val(df['Close'], -6) 
+
                              if 'Slope_MA5' in df.columns and pd.notna(df['Slope_MA5'].iloc[-1]):
                                  stock.slope_5ma = float(df['Slope_MA5'].iloc[-1])
                              if 'Slope_MA20' in df.columns and pd.notna(df['Slope_MA20'].iloc[-1]):
@@ -362,14 +395,44 @@ class UpdateManager:
                                  stock.slope_50ma = float(df['Slope_MA50'].iloc[-1])
                              if 'Slope_MA200' in df.columns and pd.notna(df['Slope_MA200'].iloc[-1]):
                                  stock.slope_200ma = float(df['Slope_MA200'].iloc[-1])
+                                 
+                             # --- Prediction Logic ---
+                             # 1. Predicted Price Next (Tomorrow, T+1)
+                             if ma5 is not None and len(ma5) >= 2 and close_minus_4 is not None:
+                                  ma5_t = get_val(ma5, -1)
+                                  ma5_t_1 = get_val(ma5, -2)
+                                  
+                                  if ma5_t is not None and ma5_t_1 is not None and slope_5ma is not None and slope_5ma_prev is not None:
+                                      if (slope_5ma * slope_5ma_prev) >= 0:
+                                          delta_ma = ma5_t - ma5_t_1
+                                          stock.predicted_price_next = 5 * delta_ma + close_minus_4
+                                      else:
+                                          stock.predicted_price_next = None 
+                                  else:
+                                       stock.predicted_price_next = None
+
+                             # 2. Predicted Price Today (Prior Prediction, T)
+                             if ma5 is not None and len(ma5) >= 3 and close_minus_5 is not None:
+                                  ma5_t_1 = get_val(ma5, -2)
+                                  ma5_t_2 = get_val(ma5, -3)
+                                  
+                                  if ma5_t_1 is not None and ma5_t_2 is not None and slope_5ma_prev is not None and slope_5ma_prev2 is not None:
+                                      if (slope_5ma_prev * slope_5ma_prev2) >= 0:
+                                           delta_ma_prev = ma5_t_1 - ma5_t_2
+                                           stock.predicted_price_today = 5 * delta_ma_prev + close_minus_5
+                                      else:
+                                          stock.predicted_price_today = None
+                                  else:
+                                       stock.predicted_price_today = None
+
                          except Exception as e:
-                             print(f"Slope save error {sym}: {e}")
+                             print(f"Prediction/Slope save error {sym}: {e}")
 
                          stock.updated_at = datetime.utcnow()
                          session.add(stock)
                          
                          # Add delay to prevent rate limiting (yfinance is sensitive)
-                         time.sleep(2)
+                         time.sleep(0.5)
                          
                          self.progress += 1
                          

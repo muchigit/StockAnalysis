@@ -1,7 +1,8 @@
 import pandas as pd
 import yfinance as yf
+import lxml # Required for earnings_dates
 import os
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 import logging
 
 # Configuration
@@ -62,30 +63,112 @@ class StockService:
             # yfinance often provides 'calendar' or 'earnings_dates'
             # 'calendar' returns a dict or dataframe with next earnings date
             next_earnings = None
+            last_earnings = None
+            
+            # Earnings Data Fetching Optimization
+            # Priority 1: Trusted Source (SecFilerRetriever) for Last Earnings
+            # Priority 2: Fast Sources (calendar) for Next Earnings
+            
+            now = pd.Timestamp.now().normalize()
+            today_str = now.strftime('%Y-%m-%d')
+            
+            # 1. Try SecFilerRetriever for Last Earnings Date (Most Accurate)
+            # This fetches actual 10-K/10-Q filing dates from SEC EDGAR
             try:
+                # Initialize locally to avoid global import issues if package missing
+                try:
+                    from sec_filer_retriever import SecFilerRetriever
+                    retriever = SecFilerRetriever(user_agent_email="admin@example.com")
+                    
+                    # Fetch latest filing on or before today
+                    filing_date_str = retriever.get_most_recent_filing(symbol, today_str)
+                    if filing_date_str:
+                        last_earnings = pd.to_datetime(filing_date_str).to_pydatetime()
+                except ImportError:
+                    logger.warning("sec_filer_retriever package not found. Falling back to yfinance.")
+                    # Fallback to yfinance logic if package missing
+                    sec = ticker.sec_filings
+                    if sec:
+                        target_types = {'10-K', '10-Q', '20-F', '6-K'}
+                        sec_sorted = sorted(sec, key=lambda x: str(x.get('date', '')), reverse=True)
+                        for s in sec_sorted:
+                            ftype = s.get('type', '').upper()
+                            fdate = s.get('date')
+                            if ftype in target_types and fdate:
+                                temp_date = None
+                                if isinstance(fdate, str):
+                                    try: temp_date = pd.to_datetime(fdate).to_pydatetime()
+                                    except: pass
+                                elif isinstance(fdate, (date, datetime)):
+                                    temp_date = pd.to_datetime(fdate).to_pydatetime()
+                                
+                                if temp_date and temp_date <= now:
+                                    last_earnings = temp_date
+                                    break
+            except Exception as e:
+                logger.warning(f"Error fetching last earnings for {symbol}: {e}")
+
+            # 2. Try Calendar for Next Earnings Date (Fast ~0.1s)
+            try:
+                # Reset next_earnings to allow fresh check
+                next_earnings = None 
+                
                 calendar = ticker.calendar
-                # calendar is usually a dict {0: [date], 'Earnings Date': [date], ...} or DataFrame
                 if isinstance(calendar, dict):
-                    # Try to find 'Earnings Date' or 0
+                    temp_next = None
                     if 'Earnings Date' in calendar:
                         dates = calendar['Earnings Date']
                         if dates and len(dates) > 0:
-                            next_earnings = dates[0]
+                            temp_next = dates[0]
                     elif 0 in calendar:
                          dates = calendar[0]
                          if dates and len(dates) > 0:
-                            next_earnings = dates[0]
+                            temp_next = dates[0]
+                    
+                    # Validation: Next Earnings must be STRICTLY >= Today
+                    # If it's in the past, it's garbage data (old schedule)
+                    if temp_next:
+                         temp_next = pd.to_datetime(temp_next).to_pydatetime()
+                         if temp_next >= now:
+                             next_earnings = temp_next
             except Exception as e:
                 logger.warning(f"Error fetching calendar for {symbol}: {e}")
 
+            # 3. Fallback: earnings_dates (Slow) - Only if missing data
+            # Strict logic: enforce Last <= Now and Next >= Now
+            if not last_earnings or not next_earnings:
+                try:
+                    ed = ticker.earnings_dates
+                    if ed is not None and not ed.empty:
+                        ed = ed.sort_index(ascending=False)
+                        if ed.index.tz is not None:
+                            ed.index = ed.index.tz_localize(None)
+                        
+                        # Fill Next if missing AND satisfy >= Now
+                        if not next_earnings:
+                            future = ed.index[ed.index >= now]
+                            if len(future) > 0:
+                                next_earnings = future.min().to_pydatetime()
+                        
+                        # Fill Last if missing AND satisfy <= Now
+                        if not last_earnings:
+                            past = ed.index[ed.index <= now]
+                            if len(past) > 0:
+                                last_earnings = past.max().to_pydatetime()
+                except Exception as e:
+                     if not last_earnings or not next_earnings:
+                        logger.warning(f"Error fetching earnings_dates fallback for {symbol}: {e}")
+
+            # Fallback for Last Earnings (if earnings_dates failed) - Use info 'mostRecentQuarter' only as last resort?
+            # User specifically said 'mostRecentQuarter' is fiscal end, not report date.
+            # So if we don't have earnings_dates, maybe it's better to leave it None than wrong?
+            # Or use it but accept it might be fiscal end.
+            # Let's trust earnings_dates primarily. If that failed, we assume we can't get report date accurately.
+            
             return {
                 "market_cap": market_cap,
                 "next_earnings_date": next_earnings,
-                # last_earnings_date is harder to get reliably without full history analysis or specific field
-                # Sometimes in info['earningsTimestamp']?
-                # For now, let's rely on info or skip last_earnings if not available easily.
-                # info might have 'mostRecentQuarter' (timestamp)
-                "last_earnings_date": pd.to_datetime(info.get('mostRecentQuarter'), unit='s') if info.get('mostRecentQuarter') else None
+                "last_earnings_date": last_earnings
             }
         except Exception as e:
             logger.error(f"Error fetching fundamentals for {symbol}: {e}")
@@ -139,15 +222,14 @@ class StockService:
             # interval: 1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo
             # threads=False is CRITICAL for ThreadPoolExecutor usage and to avoid shared state leakage
             df = yf.download(ticker_symbol, period=period, interval=interval, progress=False, auto_adjust=True, threads=False)
+            
+            # Manual Weekly Correction (try to build/append from daily)
+            if interval == '1wk' and not df.empty:
+                df = self._correct_weekly_candle(symbol, df)
+
             if df.empty:
-                # Manual Weekly Correction for empty result (try to build from daily)
-                if interval == '1wk':
-                    df = self._correct_weekly_candle(symbol, df)
-                
-                # If still empty after correction attempt, return
-                if df.empty:
-                    logger.warning(f"No data for {symbol}")
-                    return pd.DataFrame()
+                logger.warning(f"No data for {symbol}")
+                return pd.DataFrame()
 
             # Fix: Extract specific ticker if MultiIndex (yfinance thread-safety/state issue fix)
             if isinstance(df.columns, pd.MultiIndex):
@@ -239,8 +321,9 @@ class StockService:
 
     def _correct_weekly_candle(self, symbol, df):
         """
-        Manually correct the last weekly candle using recent daily data.
-        This handles cases where yfinance returns incomplete weekly data (e.g. up to Wed).
+        Manually correct or append the last weekly candle using recent daily data.
+        If the last weekly candle is from a previous week, append a new row for the current week.
+        If it matches the current week, update it with the latest daily aggregation.
         """
         try:
              # Handle Japanese stocks (4 digits) -> Append .T
@@ -248,6 +331,7 @@ class StockService:
             if symbol.isdigit() and len(symbol) == 4:
                 ticker_symbol = f"{symbol}.T"
 
+            # Fetch 1 month to be safe
             df_daily = yf.download(ticker_symbol, period="1mo", interval="1d", progress=False, auto_adjust=True, threads=False)
             if not df_daily.empty:
                 # Ensure standard columns level
@@ -257,37 +341,53 @@ class StockService:
                     else:
                          df_daily.columns = df_daily.columns.get_level_values(0)
                 
+                # Identify current week range based on today's date (or latest daily date)
+                # We want to match against the *start* of the week for the weekly chart index
+                latest_daily_date = df_daily.index[-1].date()
+                curr_week_start = latest_daily_date - timedelta(days=latest_daily_date.weekday()) # Monday
+
                 last_weekly_date = df.index[-1].date()
-                # Find the start of that week (assuming Monday)
-                week_start = last_weekly_date - timedelta(days=last_weekly_date.weekday())
+                # Ensure last_weekly_date is also normalized to Monday if it isn't (yfinance usually does)
+                last_weekly_start = last_weekly_date - timedelta(days=last_weekly_date.weekday())
                 
-                # Get daily data for this week
-                this_week_daily = df_daily[df_daily.index.date >= week_start]
+                # Get daily data for the "Current Week" (starting from curr_week_start)
+                this_week_daily = df_daily[df_daily.index.date >= curr_week_start]
                 
                 if not this_week_daily.empty and len(this_week_daily) > 0:
-                    # Re-aggregate
-                    new_open = this_week_daily['Open'].iloc[0]
-                    new_high = this_week_daily['High'].max()
-                    new_low = this_week_daily['Low'].min()
+                    # Aggregate
                     new_close = this_week_daily['Close'].iloc[-1]
                     new_volume = this_week_daily['Volume'].sum()
-                    
-                    # Log correction
-                    logger.info(f"Correcting weekly candle for {symbol} ({last_weekly_date}): "
-                                f"Open {df['Open'].iloc[-1]:.2f}->{new_open:.2f}, "
-                                f"Close {df['Close'].iloc[-1]:.2f}->{new_close:.2f}")
-                    
-                    # Replace last row
-                    df.iloc[-1, df.columns.get_loc('Open')] = new_open
-                    df.iloc[-1, df.columns.get_loc('High')] = new_high
-                    df.iloc[-1, df.columns.get_loc('Low')] = new_low
-                    df.iloc[-1, df.columns.get_loc('Close')] = new_close
-                    df.iloc[-1, df.columns.get_loc('Volume')] = new_volume
-                    
+
+                    # Check if we need to UPDATE existing or APPEND new
+                    if last_weekly_start == curr_week_start:
+                        # Update existing
+                        logger.info(f"Updating weekly candle for {symbol} ({last_weekly_date}): Close {new_close:.2f}")
+                        df.iloc[-1, df.columns.get_loc('Open')] = new_open
+                        df.iloc[-1, df.columns.get_loc('High')] = new_high
+                        df.iloc[-1, df.columns.get_loc('Low')] = new_low
+                        df.iloc[-1, df.columns.get_loc('Close')] = new_close
+                        df.iloc[-1, df.columns.get_loc('Volume')] = new_volume
+                    elif last_weekly_start < curr_week_start:
+                        # Append new row
+                        logger.info(f"Appending new weekly candle for {symbol} ({curr_week_start}): Close {new_close:.2f}")
+                        # Create a new DataFrame for the single row
+                        new_index = pd.to_datetime(curr_week_start).tz_localize(df.index.tz) # Match timezone
+                        new_row = pd.DataFrame({
+                            'Open': [new_open],
+                            'High': [new_high],
+                            'Low': [new_low],
+                            'Close': [new_close],
+                            'Volume': [new_volume]
+                        }, index=[new_index])
+                        
+                        # Concat
+                        df = pd.concat([df, new_row])
+
         except Exception as e:
             logger.error(f"Error correcting weekly candle for {symbol}: {e}")
             
         return df
+
 
     def calculate_performance_metrics(self, df):
         """

@@ -1,12 +1,13 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 
 export type ColumnFilterValue = {
-    type: 'select' | 'range' | 'date'; // Added 'date'
+    type: 'select' | 'range' | 'date' | 'text'; // Added 'text'
     selected?: string[]; // For select
     min?: number;        // For range
     max?: number;        // For range
     startDate?: string;  // For date
     endDate?: string;    // For date
+    text?: string;       // For text
 };
 
 interface HeaderFilterProps {
@@ -16,9 +17,10 @@ interface HeaderFilterProps {
     currentFilter?: ColumnFilterValue;
     onApply: (filter: ColumnFilterValue | null) => void;
     title: string;
+    mode?: 'select' | 'text'; // Explicit mode override for string types
 }
 
-export default function HeaderFilter({ columnKey, dataType, uniqueValues, currentFilter, onApply, title }: HeaderFilterProps) {
+export default function HeaderFilter({ columnKey, dataType, uniqueValues, currentFilter, onApply, title, mode }: HeaderFilterProps) {
     const [isOpen, setIsOpen] = useState(false);
     const wrapperRef = useRef<HTMLDivElement>(null);
     const popupRef = useRef<HTMLDivElement>(null); // Ref for portal content
@@ -29,6 +31,7 @@ export default function HeaderFilter({ columnKey, dataType, uniqueValues, curren
     const [tempMax, setTempMax] = useState<string>(currentFilter?.max?.toString() || '');
     const [tempStartDate, setTempStartDate] = useState<string>(currentFilter?.startDate || ''); // YYYY-MM-DD
     const [tempEndDate, setTempEndDate] = useState<string>(currentFilter?.endDate || '');     // YYYY-MM-DD
+    const tempTextRef = useRef<string>(currentFilter?.text || ''); // Use ref for text to avoid re-renders during IME
     const [searchTerm, setSearchTerm] = useState('');
 
     // Reset local state when opening
@@ -39,6 +42,7 @@ export default function HeaderFilter({ columnKey, dataType, uniqueValues, curren
             setTempMax(currentFilter?.max?.toString() || '');
             setTempStartDate(currentFilter?.startDate || '');
             setTempEndDate(currentFilter?.endDate || '');
+            tempTextRef.current = currentFilter?.text || '';
             setSearchTerm('');
         }
     }, [isOpen, currentFilter]);
@@ -80,6 +84,13 @@ export default function HeaderFilter({ columnKey, dataType, uniqueValues, curren
                 onApply(null);
             } else {
                 onApply({ type: 'date', startDate: tempStartDate, endDate: tempEndDate });
+            }
+        } else if (mode === 'text') {
+            const textVal = tempTextRef.current.trim();
+            if (!textVal) {
+                onApply(null);
+            } else {
+                onApply({ type: 'text', text: textVal });
             }
         } else {
             // String/Select
@@ -225,6 +236,26 @@ export default function HeaderFilter({ columnKey, dataType, uniqueValues, curren
                                         />
                                     </div>
                                 </div>
+                            ) : mode === 'text' ? (
+                                <div className="p-1">
+                                    <label className="block text-xs text-gray-400 mb-1">含まれる文字:</label>
+                                    <input
+                                        type="text"
+                                        defaultValue={tempTextRef.current}
+                                        onChange={(e) => { tempTextRef.current = e.target.value; }}
+                                        className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-blue-500"
+                                        placeholder="検索..."
+                                        autoFocus
+                                        onKeyDown={(e) => {
+                                            e.stopPropagation();
+                                            if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                                handleApply();
+                                            }
+                                        }}
+                                        onKeyUp={(e) => e.stopPropagation()}
+                                        onKeyPress={(e) => e.stopPropagation()}
+                                    />
+                                </div>
                             ) : (
                                 <div className="flex flex-col h-60">
                                     <input
@@ -261,8 +292,8 @@ export default function HeaderFilter({ columnKey, dataType, uniqueValues, curren
                             <button onClick={handleApply} className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded font-bold shadow-lg transition">適用</button>
                         </div>
                     </div>
-                </Portal>
+                </Portal >
             )}
-        </div>
+        </div >
     );
 }

@@ -21,6 +21,7 @@ class Importer:
         """
         self.log_debug(f"Starting import for files: {file_paths}")
         total_imported = 0
+        added_symbols = []
         with Session(engine) as session:
             for file_path in file_paths:
                 try:
@@ -101,10 +102,13 @@ class Importer:
                         
                         # Upsert Stock
                         stock = session.get(Stock, symbol)
+                        is_new_stock = False
                         if not stock:
                             stock = Stock(symbol=symbol)
                             stock.first_import_date = datetime.utcnow()
                             session.add(stock)
+                            is_new_stock = True
+                            added_symbols.append(symbol)
                         else:
                             # Backfill if missing (optional, but good for existing imports if re-run)
                             if not stock.first_import_date:
@@ -166,8 +170,8 @@ class Importer:
                         if found_date:
                             print(f"[Import] Found date for {symbol}: {found_date}")
                             stock.ibd_rating_date = found_date
-                            session.add(stock)
-                        
+                            if not is_new_stock and stock not in session.new:
+                                session.add(stock)
 
                         # Market Cap
                         # Aliases: 'Market Cap', '時価総額'
@@ -246,7 +250,7 @@ class Importer:
                     print(f"Error processing file {file_path}: {e}")
                         
             session.commit()
-        return total_imported
+        return {'count': total_imported, 'added': added_symbols}
 
     def import_moomoo_csv(self, file_path: str):
         """

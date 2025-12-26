@@ -49,15 +49,27 @@ def import_files(request: FileImportRequest):
     print(f"[Automation Router] Finviz: {finviz_files}, Moomoo: {moomoo_files}")
     
     # Run synchronously so frontend waits
-    run_import_task(finviz_files, moomoo_files)
+    result = run_import_task(finviz_files, moomoo_files)
     
-    return {"status": "Import completed"}
+    return {"status": "Import completed", "added_stocks": result.get('added', [])}
 
 def run_import_task(finviz_files, moomoo_files):
+    result = {'count': 0, 'added': []}
     if finviz_files:
-        importer.import_finviz_ibd_files(finviz_files)
+        res = importer.import_finviz_ibd_files(finviz_files)
+        if isinstance(res, int): # Legacy fallback just in case
+             result['count'] += res
+        elif isinstance(res, dict):
+             result['count'] += res.get('count', 0)
+             result['added'].extend(res.get('added', []))
+
     for m in moomoo_files:
-        importer.import_moomoo_csv(m)
+        # Moomoo import currently only returns count, logic can be updated later if needed
+        # For now just add count
+        count = importer.import_moomoo_csv(m)
+        result['count'] += count
+    
+    return result
 
 @router.post("/refresh-data/{symbol}")
 def refresh_stock_data(symbol: str, background_tasks: BackgroundTasks):

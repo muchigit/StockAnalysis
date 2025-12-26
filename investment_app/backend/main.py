@@ -27,6 +27,8 @@ from backend.routers.trading import router as trading_router
 
 app.include_router(system_router)
 app.include_router(trading_router)
+from backend.routers.alerts import router as alerts_router
+app.include_router(alerts_router)
 
 from .routers.history import router as history_router
 app.include_router(history_router)

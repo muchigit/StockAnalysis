@@ -129,7 +129,17 @@ const dictionary = {
         addedToResearch: "Added {{symbol}} to Deep Research list 🧠",
         indexAdded: "Index added successfully",
         failedToAddIndex: "Failed to add index",
-        reportsUpdated: "Reports updated"
+        reportsUpdated: "Reports updated",
+        toggleBuyCandidate: "Toggle Buy Candidate",
+        failedToUpdate: "Failed to update",
+        alert: "Alert",
+        dashboard: "Dashboard",
+        refresh: "Refresh",
+        import: "Import",
+        settings: "Settings",
+        all: "All",
+        trending: "Trending",
+        withNotes: "With Notes"
     },
     ja: {
         dashboardTitle: "投資ダッシュボード",
@@ -257,7 +267,17 @@ const dictionary = {
         addedToResearch: "Deep Researchリストに追加しました 🧠: {{symbol}}",
         indexAdded: "インデックスを追加しました",
         failedToAddIndex: "インデックスの追加に失敗しました",
-        reportsUpdated: "レポート情報を更新しました"
+        reportsUpdated: "レポート情報を更新しました",
+        toggleBuyCandidate: "買い候補を切り替え",
+        failedToUpdate: "更新に失敗しました",
+        alert: "アラート",
+        dashboard: "ダッシュボード",
+        refresh: "更新",
+        import: "インポート",
+        settings: "設定",
+        all: "すべて",
+        trending: "上昇トレンド",
+        withNotes: "メモ有"
     }
 };
 
