@@ -9,3 +9,4 @@ undetected-chromedriver
 matplotlib
 pyarrow
 lxml
+mplfinance

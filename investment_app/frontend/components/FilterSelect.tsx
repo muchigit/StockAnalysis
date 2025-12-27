@@ -47,24 +47,19 @@ export default function FilterSelect({ onSelect, refreshKey, currentCriteria, on
         };
         const currentStr = normalize(currentCriteria);
 
-        console.log("FilterSelect Debug: Searching for match", { currentCriteria, currentStr, filtersCount: filters.length });
+
 
         const match = filters.find(f => {
             try {
                 const c = JSON.parse(f.criteria_json);
                 const normC = normalize(c);
-                const isMatch = normC === currentStr;
-                // console.log("Checking filter:", f.name, { c, normC, isMatch }); // Too verbose for all
-                if (isMatch) console.log("MATCH FOUND:", f.name);
-                return isMatch;
+                return normC === currentStr;
             } catch { return false; }
         });
 
         if (match) {
-            console.log("Setting Selected ID:", match.id);
             setSelectedId(match.id.toString());
         } else {
-            console.log("No match found. Setting empty.");
             setSelectedId('');
         }
     }, [currentCriteria, filters]);

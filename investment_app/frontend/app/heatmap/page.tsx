@@ -1,216 +1,331 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { fetchStocks, Stock } from '@/lib/api';
-import { Treemap, Tooltip, ResponsiveContainer } from 'recharts';
+import { Treemap, ResponsiveContainer, Tooltip } from 'recharts';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
-interface HeatmapData {
-    name: string;
-    size: number; // Market Value
-    change: number; // Daily Change %
-    company: string;
-    pl: number; // Unrealized P&L
-    buyDate: string; // Last Buy Date
-    [key: string]: any;
-}
-
+// Custom Content Component for Treemap
 const CustomizedContent = (props: any) => {
-    const { root, depth, x, y, width, height, index, payload, colors, rank, name, change, onDoubleClick } = props;
+    const router = useRouter();
+    let { depth, x, y, width, height, name, change, isHeld, index } = props;
 
-    if (depth < 2) return null; // Root/Category (if any)
-
-    // Color logic
-    // User request: "Larger number (magnitude) -> Brighter color", "Smaller -> Darker"
-    let bgColor = '#374151'; // Gray-700
-
-    if (change > 0) {
-        // Green scale: Higher change -> Brighter/Lighter Green
-        if (change > 3) bgColor = '#22c55e'; // Green-500 (Bright)
-        else if (change > 1) bgColor = '#15803d'; // Green-700 (Medium)
-        else bgColor = '#14532d'; // Green-900 (Dark)
-    } else if (change < 0) {
-        // Red scale: Lower (more negative) -> Brighter/Lighter Red
-        if (change < -3) bgColor = '#ef4444'; // Red-500 (Bright)
-        else if (change < -1) bgColor = '#b91c1c'; // Red-700 (Medium)
-        else bgColor = '#7f1d1d'; // Red-900 (Dark)
+    // Fallback if change is missing in props (sometimes stripped by Recharts)
+    if (change === undefined && props.payload && props.payload.change !== undefined) {
+        change = props.payload.change;
     }
 
-    // Font size logic - Increased as requested
-    // Ensure it fits but be bolder and larger
-    const maxFontSize = 32;
-    const minFontSize = 12; // increased from implied small
-    const calculatedFontSize = Math.min(width / 4, height / 3, maxFontSize);
-    const fontSize = Math.max(calculatedFontSize, minFontSize);
+    // Recharts Treemap 'children' check to identify leaf
+    const isLeaf = !props.children && !props.hasChildren && depth > 0;
 
+    if (isLeaf) {
+        // This is a leaf (Stock)
+
+        // Color logic based on Change %
+        let fill = "#374151"; // Gray default
+        if (change !== undefined) {
+            const abs = Math.abs(change);
+            const opacity = Math.min(1, Math.max(0.4, abs / 3)); // Increased min opacity
+
+            if (change > 0) fill = `rgba(34, 197, 94, ${opacity})`; // Green
+            else fill = `rgba(239, 68, 68, ${opacity})`; // Red
+        }
+
+        // Holding Highlight
+        const stroke = isHeld ? "#fbbf24" : "#111827"; // Amber-400 for held, dark for others
+        const strokeWidth = isHeld ? 4 : 1;
+        const zIndex = isHeld ? 10 : 1;
+
+        // Text contrast
+        const textColor = "#ffffff";
+        const showText = width > 24 && height > 14;
+        const showSubText = width > 24 && height > 30;
+
+        return (
+            <g
+                onClick={(e) => {
+                    // Prevent propagation if needed, but Treemap might need click for zoom (not used here)
+                }}
+                onDoubleClick={() => router.push(`/stocks/${name}`)}
+                style={{ cursor: 'pointer', zIndex }}
+            >
+                <rect
+                    x={x}
+                    y={y}
+                    width={width}
+                    height={height}
+                    style={{
+                        fill: fill,
+                        stroke: stroke,
+                        strokeWidth: strokeWidth,
+                        paintOrder: 'stroke', // Ensure stroke doesn't eat too much fill
+                    }}
+                />
+                {showText && (
+                    <text
+                        x={x + width / 2}
+                        y={y + height / 2 - (showSubText ? 8 : -2)}
+                        textAnchor="middle"
+                        fill={textColor}
+                        fontSize={Math.min(width / 3, 24)}
+                        fontWeight="900"
+                        style={{ pointerEvents: 'none', textShadow: 'none' }} // Explicitly none
+                    >
+                        {name}
+                    </text>
+                )}
+                {showSubText && change !== undefined && (
+                    <text
+                        x={x + width / 2}
+                        y={y + height / 2 + 14}
+                        textAnchor="middle"
+                        fill="#eeeeee"
+                        fontSize={Math.min(width / 4, 16)}
+                        fontWeight="bold"
+                        style={{ pointerEvents: 'none', textShadow: 'none' }} // Explicitly none
+                    >
+                        {change > 0 ? '+' : ''}{change.toFixed(1)}%
+                    </text>
+                )}
+            </g>
+        );
+    }
+
+    // Sector Node (Container)
     return (
-        <g
-            onDoubleClick={() => onDoubleClick && onDoubleClick(props)}
-            style={{ cursor: 'pointer' }}
-        >
+        <g>
             <rect
                 x={x}
                 y={y}
                 width={width}
                 height={height}
                 style={{
-                    fill: bgColor,
-                    stroke: '#000', // Black border for better separation
-                    strokeWidth: 2 / (depth + 1e-10),
-                    strokeOpacity: 0.5,
+                    fill: 'none',
+                    stroke: '#fff',
+                    strokeWidth: 2,
+                    strokeOpacity: 0.1,
                 }}
             />
-            {width > 40 && height > 30 && (
-                <>
-                    <text
-                        x={x + width / 2}
-                        y={y + height / 2 - fontSize * 0.4}
-                        textAnchor="middle"
-                        fill="#fff"
-                        fontSize={fontSize}
-                        fontWeight="900"
-                        style={{ textShadow: '0px 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }} // Shadow for visibility
-                    >
-                        {name}
-                    </text>
-                    <text
-                        x={x + width / 2}
-                        y={y + height / 2 + fontSize * 0.8}
-                        textAnchor="middle"
-                        fill="#f3f4f6"
-                        fontSize={Math.max(fontSize * 0.6, 11)}
-                        fontWeight="bold"
-                        style={{ textShadow: '0px 1px 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}
-                    >
-                        {change > 0 ? '+' : ''}{change.toFixed(2)}%
-                    </text>
-                </>
+            {width > 50 && height > 20 && (
+                <text
+                    x={x + 4}
+                    y={y + 14}
+                    textAnchor="start"
+                    fill="#fff"
+                    fontSize={12}
+                    fontWeight="900"
+                    fillOpacity={0.5}
+                    style={{ pointerEvents: 'none' }}
+                >
+                    {name}
+                </text>
             )}
         </g>
     );
+
 };
 
-const CustomTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
-        const data = payload[0].payload;
-        return (
-            <div className="bg-gray-800 border border-gray-700 p-3 rounded shadow-lg text-sm text-gray-200">
-                <p className="font-bold text-lg mb-1">{data.name}</p>
-                <p className="text-gray-400 text-xs mb-2">{data.company}</p>
-                <div className="space-y-1">
-                    <p className="flex justify-between gap-4">
-                        <span className="text-gray-500">評価額:</span>
-                        <span className="font-mono">{Math.round(data.size).toLocaleString()}</span>
-                    </p>
-                    <p className="flex justify-between gap-4">
-                        <span className="text-gray-500">含み損益:</span>
-                        <span className={`font-mono font-bold ${data.pl > 0 ? 'text-green-400' : data.pl < 0 ? 'text-red-400' : 'text-gray-400'}`}>
-                            {data.pl > 0 ? '+' : ''}{Math.round(data.pl).toLocaleString()}
-                        </span>
-                    </p>
-                    <p className="flex justify-between gap-4">
-                        <span className="text-gray-500">最終購入日:</span>
-                        <span className="font-mono">{data.buyDate || '-'}</span>
-                    </p>
-                    <p className="flex justify-between gap-4">
-                        <span className="text-gray-500">騰落率:</span>
-                        <span className={`font-mono font-bold ${data.change > 0 ? 'text-green-400' : data.change < 0 ? 'text-red-400' : 'text-gray-400'}`}>
-                            {data.change > 0 ? '+' : ''}{data.change.toFixed(2)}%
-                        </span>
-                    </p>
-                </div>
-            </div>
-        );
-    }
-    return null;
+
+// Helper to format market cap for dropdown
+const formatCap = (cap: number | null) => {
+    if (!cap) return "All";
+    if (cap >= 1e12) return `< $${cap / 1e12}T`;
+    if (cap >= 1e9) return `< $${cap / 1e9}B`;
+    return `< $${cap / 1e6}M`;
 };
 
 export default function HeatmapPage() {
-    const [data, setData] = useState<HeatmapData[]>([]);
+    const [stocks, setStocks] = useState<Stock[]>([]);
     const [loading, setLoading] = useState(true);
-    const router = useRouter(); // Import needed from next/navigation
+    const [metric, setMetric] = useState<'1d' | '5d'>('1d');
+    const [maxCap, setMaxCap] = useState<number | null>(null); // Null means no limit
+
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        async function load() {
-            try {
-                const stocks = await fetchStocks(0, 2000, 'stock');
-                const holdings = stocks.filter(s => (s.holding_quantity || 0) > 0.0001);
+        setLoading(true);
+        setError(null);
+        console.log("Heatmap: Starting fetch...");
 
-                const mapped = holdings.map(s => {
-                    const price = s.current_price || 0;
-                    const val = (s.holding_quantity || 0) * price;
-                    return {
-                        name: s.symbol,
-                        size: val,
-                        change: s.change_percentage_1d || 0,
-                        company: s.company_name,
-                        pl: s.unrealized_pl || 0,
-                        buyDate: s.last_buy_date || ''
-                    };
-                }).filter(d => d.size > 0);
+        const timeoutId = setTimeout(() => {
+            setError("Timeout: Server took too long to respond.");
+            setLoading(false);
+        }, 15000); // 15s timeout
 
-                // Sort by size desc for better layout usually, but Treemap handles it
-                mapped.sort((a, b) => b.size - a.size);
-
-                setData(mapped);
-            } catch (e) {
-                console.error(e);
-            } finally {
+        fetchStocks(0, 5000, "stock", false, true).then(data => {
+            clearTimeout(timeoutId);
+            console.log("Heatmap: Data received", data.length);
+            setStocks(data);
+            if (data.length === 0) {
+                setError("No stocks found. Please check database or connection.");
+            } else {
                 setLoading(false);
+                // Log sample data to verify market_cap formatting
+                const sample = data.find(s => s.market_cap > 0);
+                console.log("Sample Stock Market Cap:", sample?.symbol, sample?.market_cap, typeof sample?.market_cap);
             }
-        }
-        load();
+        }).catch(err => {
+            clearTimeout(timeoutId);
+            console.error("Heatmap Fetch Error:", err);
+            setError(`Failed to load data: ${err.message}`);
+            setLoading(false);
+        });
+
+        return () => clearTimeout(timeoutId);
     }, []);
 
-    if (loading) return <div className="min-h-screen bg-black text-white flex items-center justify-center">読み込み中...</div>;
+    const treeData = useMemo(() => {
+        if (stocks.length === 0) return [];
 
-    const treeData = [{
-        name: '保有銘柄',
-        children: data
-    }];
+        const sectors: Record<string, any> = {};
 
-    // Treemap onClick/DoubleClick wrapper
-    const handleDoubleClick = (node: any) => {
-        // Treemap node returns something like { name, value, x, y, ... } + payload if custom?
-        // We can check if name is present.
-        if (node && node.name) {
-            router.push(`/stocks/${node.name}`);
-        }
-    };
+        let filteredCount = 0;
+        stocks.forEach(s => {
+            if (!s.sector || !s.market_cap || s.asset_type === 'index') return;
+
+            // Market Cap Filter
+            // Handle potentially string or already number market_cap
+            // Python backend might send scientific notation or simple ints
+            const cap = Number(s.market_cap);
+
+            if (maxCap !== null) {
+                // Debug first few rejections
+                if (cap > maxCap) {
+                    // console.log(`Filtering out ${s.symbol}: ${cap} > ${maxCap}`);
+                    return;
+                }
+            }
+
+            if (!sectors[s.sector]) {
+                sectors[s.sector] = { name: s.sector, children: [] };
+            }
+
+            const change = metric === '1d' ? s.change_percentage_1d : s.change_percentage_5d;
+
+            sectors[s.sector].children.push({
+                name: s.symbol,
+                size: cap,
+                change: change || 0,
+                company: s.company_name,
+                isHeld: (s.holding_quantity || 0) > 0.0001 // Determine strict holding
+            });
+            filteredCount++;
+        });
+
+        console.log(`Filtered stocks count: ${filteredCount} / ${stocks.length} (MaxCap: ${maxCap})`);
+
+        // Filter out empty sectors
+        return Object.values(sectors).filter(s => s.children.length > 0);
+
+    }, [stocks, metric, maxCap]);
 
     return (
-        <div className="min-h-screen bg-black text-gray-200 font-sans flex flex-col">
+        <div className="min-h-screen bg-black text-gray-200">
             <header className="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-900/50 backdrop-blur">
                 <div className="flex items-center gap-4">
-                    <Link href="/" className="text-gray-400 hover:text-white transition">
-                        ← ダッシュボード
+                    <Link href="/" className="text-gray-400 hover:text-white transition flex items-center gap-1">
+                        <span>←</span> Dashboard
                     </Link>
-                    <h1 className="text-2xl font-bold bg-gradient-to-r from-green-400 to-blue-400 bg-clip-text text-transparent">
-                        ポートフォリオ・ヒートマップ
-                    </h1>
+                    <h1 className="text-2xl font-bold text-white tracking-tight">Market Heatmap</h1>
+                </div>
+
+                <div className="flex items-center gap-4 flex-wrap">
+                    <div className="text-xs text-gray-400 font-mono">
+                        {treeData.reduce((acc, sector) => acc + sector.children.length, 0)} Stocks
+                    </div>
+                    {/* Market Cap Filter */}
+                    <div className="flex items-center gap-2 bg-gray-800 rounded-lg p-1 border border-gray-700">
+                        <span className="text-xs text-gray-400 px-2 font-mono">MAX CAP:</span>
+                        <select
+                            value={maxCap || ""}
+                            onChange={(e) => setMaxCap(e.target.value ? Number(e.target.value) : null)}
+                            className="bg-gray-900 text-white text-sm rounded border border-gray-700 px-2 py-1 focus:outline-none focus:border-blue-500"
+                        >
+                            <option value="">All Size</option>
+                            <option value={2000e9}>&lt; $2T (Excl. Mega)</option>
+                            <option value={200e9}>&lt; $200B (Large)</option>
+                            <option value={50e9}>&lt; $50B (Mid)</option>
+                            <option value={10e9}>&lt; $10B (Small)</option>
+                            <option value={2e9}>&lt; $2B (Micro)</option>
+                        </select>
+                    </div>
+
+                    <div className="flex bg-gray-800 rounded-lg p-1 border border-gray-700">
+                        <button
+                            onClick={() => setMetric('1d')}
+                            className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${metric === '1d' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
+                        >
+                            1 Day
+                        </button>
+                        <button
+                            onClick={() => setMetric('5d')}
+                            className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${metric === '5d' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
+                        >
+                            5 Days
+                        </button>
+                    </div>
                 </div>
             </header>
 
-            <main className="flex-1 p-4">
-                {data.length === 0 ? (
-                    <div className="flex h-full items-center justify-center text-gray-500">
-                        保有銘柄が見つかりません。
+            <main className="p-1 h-[calc(100vh-73px)] overflow-hidden">
+                {loading ? (
+                    <div className="flex items-center justify-center h-full">
+                        <div className="flex flex-col items-center gap-4">
+                            <div className="animate-spin h-12 w-12 border-4 border-blue-500 rounded-full border-t-transparent"></div>
+                            <div className="text-blue-400 animate-pulse">Loading Market Data...</div>
+                        </div>
+                    </div>
+                ) : error ? (
+                    <div className="flex items-center justify-center h-full text-red-500 flex-col gap-2">
+                        <div className="text-2xl font-bold">⚠️ Error</div>
+                        <div>{error}</div>
+                        <button
+                            onClick={() => window.location.reload()}
+                            className="bg-gray-800 px-4 py-2 rounded hover:bg-gray-700 transition text-white mt-4"
+                        >
+                            Retry
+                        </button>
                     </div>
                 ) : (
-                    <div className="w-full h-[calc(100vh-100px)]">
-                        <ResponsiveContainer width="100%" height="100%">
-                            <Treemap
-                                data={treeData}
-                                dataKey="size"
-                                stroke="#000"
-                                fill="#8884d8"
-                                content={<CustomizedContent onDoubleClick={handleDoubleClick} />}
-                            >
-                                <Tooltip content={<CustomTooltip />} />
-                            </Treemap>
-                        </ResponsiveContainer>
-                    </div>
+                    <ResponsiveContainer width="100%" height="100%">
+                        <Treemap
+                            key={`${metric}-${maxCap || 'all'}`} // Force re-render on filter change
+                            data={treeData}
+                            dataKey="size"
+                            aspectRatio={16 / 9}
+                            stroke="#111"
+                            content={<CustomizedContent />}
+                            animationDuration={0} // Disable animation for performance with many nodes
+                        >
+                            <Tooltip
+                                content={({ payload }) => {
+                                    if (payload && payload.length) {
+                                        const data = payload[0].payload;
+                                        // Handle hovering on sector node vs leaf
+                                        if (!data.company) return null; // Likely a sector node
+
+                                        return (
+                                            <div className="bg-gray-900/90 border border-gray-700 p-3 rounded-lg shadow-2xl text-xs backdrop-blur-sm z-[100]">
+                                                <div className="font-bold text-white text-base mb-1">{data.name}</div>
+                                                <div className="text-gray-300 mb-2 max-w-[200px] truncate">{data.company}</div>
+                                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-gray-400">
+                                                    <div>Market Cap:</div>
+                                                    <div className="text-white text-right font-mono">${(data.size / 1e9).toFixed(2)}B</div>
+
+                                                    <div>Change ({metric}):</div>
+                                                    <div className={`text-right font-mono font-bold ${data.change > 0 ? 'text-green-400' : data.change < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                                                        {data.change > 0 ? '+' : ''}{data.change?.toFixed(2)}%
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                }}
+                            />
+                        </Treemap>
+                    </ResponsiveContainer>
                 )}
             </main>
         </div>

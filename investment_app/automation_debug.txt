@@ -750,3 +750,139 @@ Content Start: TBLA [%COMPANYNAME%] 分析レポート(2025-12-25)
 # 依頼事項
 以下...
 Replaced with: Taboola.com Ltd.
+
+--- Processing CALC ---
+Template has COMPANYNAME? True
+Content Start: CALC [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下...
+Replaced with: CalciMedica, Inc.
+
+--- Processing CX ---
+Template has COMPANYNAME? True
+Content Start: CX [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下で示...
+Replaced with: CEMEX, S.A.B. de C.V.
+
+--- Processing EPRX ---
+Template has COMPANYNAME? True
+Content Start: EPRX [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下...
+Replaced with: Eupraxia Pharmaceuticals Inc.
+
+--- Processing MSB ---
+Template has COMPANYNAME? True
+Content Start: MSB [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下で...
+Replaced with: Mesabi Trust
+
+--- Processing OPLN ---
+Template has COMPANYNAME? True
+Content Start: OPLN [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下...
+Replaced with: OPENLANE, Inc.
+
+--- Processing SGML ---
+Template has COMPANYNAME? True
+Content Start: SGML [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下...
+Replaced with: Sigma Lithium Corporation
+
+--- Processing TCBS ---
+Template has COMPANYNAME? True
+Content Start: TCBS [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下...
+Replaced with: Texas Community Bancshares, Inc.
+
+--- Processing TGB ---
+Template has COMPANYNAME? True
+Content Start: TGB [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下で...
+Replaced with: Taseko Mines Limited
+
+--- Processing USEA ---
+Template has COMPANYNAME? True
+Content Start: USEA [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下...
+Replaced with: United Maritime Corporation
+
+--- Processing ZURA ---
+Template has COMPANYNAME? True
+Content Start: ZURA [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下...
+Replaced with: Zura Bio Limited
+
+--- Processing ZURA ---
+Template has COMPANYNAME? True
+Content Start: ZURA [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下...
+Replaced with: Zura Bio Limited
+
+--- Processing NVDA ---
+Template has COMPANYNAME? True
+Content Start: NVDA [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下...
+Replaced with: NVIDIA Corporation
+
+--- Processing NVDA ---
+Template has COMPANYNAME? True
+Content Start: NVDA [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下...
+Replaced with: NVIDIA Corporation
+
+--- Processing NVDA ---
+Template has COMPANYNAME? True
+Content Start: NVDA [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下...
+Replaced with: NVIDIA Corporation
+
+--- Processing DAIO ---
+Template has COMPANYNAME? True
+Content Start: DAIO [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下...
+Replaced with: Data I/O Corporation
+
+--- Processing DVS ---
+Template has COMPANYNAME? True
+Content Start: DVS [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下で...
+Replaced with: Dolly Varden Silver Corporation
+
+--- Processing RAVE ---
+Template has COMPANYNAME? True
+Content Start: RAVE [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下...
+Replaced with: Rave Restaurant Group, Inc.

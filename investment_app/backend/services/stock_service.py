@@ -56,8 +56,23 @@ class StockService:
             ticker = yf.Ticker(ticker_symbol)
             info = ticker.info
             
-            # Market Cap
+            # Market Cap & Financials
             market_cap = info.get('marketCap')
+            
+            # Extract new financial metrics
+            metrics = {
+                'market_cap': market_cap,
+                'forward_pe': info.get('forwardPE'),
+                'trailing_pe': info.get('trailingPE'),
+                'price_to_book': info.get('priceToBook'),
+                'dividend_yield': info.get('dividendYield'),
+                'return_on_equity': info.get('returnOnEquity'),
+                'revenue_growth': info.get('revenueGrowth'),
+                'ebitda': info.get('ebitda'),
+                'target_mean_price': info.get('targetMeanPrice'),
+                'high_52_week': info.get('fiftyTwoWeekHigh'),
+                'low_52_week': info.get('fiftyTwoWeekLow')
+            }
             
             # Earnings
             # yfinance often provides 'calendar' or 'earnings_dates'
@@ -164,15 +179,179 @@ class StockService:
             # So if we don't have earnings_dates, maybe it's better to leave it None than wrong?
             # Or use it but accept it might be fiscal end.
             # Let's trust earnings_dates primarily. If that failed, we assume we can't get report date accurately.
+                if not next_earnings and 'earningsDate' in info:
+                     # Some tickers have earningsDate in info
+                     pass
+
+            metrics['last_earnings_date'] = last_earnings
+            metrics['next_earnings_date'] = next_earnings
             
-            return {
-                "market_cap": market_cap,
-                "next_earnings_date": next_earnings,
-                "last_earnings_date": last_earnings
-            }
+            return metrics
         except Exception as e:
             logger.error(f"Error fetching fundamentals for {symbol}: {e}")
-            return {}
+            return None
+            
+    def fetch_news(self, symbol):
+        """
+        Fetch latest news from yfinance.
+        Returns list of dicts.
+        """
+        try:
+            ticker_symbol = symbol
+            if symbol.isdigit() and len(symbol) == 4:
+                ticker_symbol = f"{symbol}.T"
+                
+            ticker = yf.Ticker(ticker_symbol)
+            news_list = ticker.news or []
+            results = []
+            for item in news_list:
+                # Handle nested content structure (newer yfinance)
+                data = item.get('content', item)
+                
+                # Check for required fields to avoid DB errors
+                title = data.get('title')
+                if not title:
+                     continue # Skip items without title
+
+                # Get Link (Check multiple possible keys)
+                link = data.get('link') 
+                if not link:
+                    # check canonicalUrl or clickThroughUrl
+                    if 'clickThroughUrl' in data and data['clickThroughUrl']:
+                        link = data['clickThroughUrl'].get('url')
+                    elif 'canonicalUrl' in data and data['canonicalUrl']:
+                        link = data['canonicalUrl'].get('url')
+                
+                if not link:
+                     continue # Skip items without link
+                
+                # Date parsing
+                dt = datetime.utcnow()
+                if 'providerPublishTime' in item: # Usually at top level even if content exists? Or in data?
+                    pt = item.get('providerPublishTime')
+                    if pt: dt = datetime.fromtimestamp(pt)
+                elif 'pubDate' in data:
+                     # Parse ISO string if possible, or leave as utcnow
+                     try:
+                         # simple parser or split
+                         # "2024-12-27T..."
+                         dt = datetime.fromisoformat(data['pubDate'].replace('Z', '+00:00'))
+                     except:
+                         pass
+
+                thumb_url = None
+                if 'thumbnail' in data and data['thumbnail'] and 'resolutions' in data['thumbnail']: # check inside data
+                     res_list = data['thumbnail'].get('resolutions')
+                     if res_list:
+                          thumb_url = res_list[0].get('url')
+                elif 'thumbnail' in item and item['thumbnail'] and 'resolutions' in item['thumbnail']: # check top level fallback
+                     res_list = item['thumbnail'].get('resolutions')
+                     if res_list:
+                          thumb_url = res_list[0].get('url')
+
+                results.append({
+                    'title': title,
+                    'publisher': data.get('publisher', 'Unknown'), # Publisher might be inside data
+                    'link': link,
+                    'provider_publish_time': dt,
+                    'type': data.get('contentType', 'STORY'),
+                    'thumbnail_url': thumb_url,
+                    'related_tickers': data.get('relatedTickers', []) # Inside data usually
+                })
+            return results
+        except Exception as e:
+             logger.error(f"Error fetching news for {symbol}: {e}")
+             return []
+
+    def fetch_financial_history(self, symbol):
+        """
+        Fetch annual and quarterly financial history (Revenue, Net Income, EPS) from yfinance.
+        Returns a list of dicts:
+        [{
+            'date': date,
+            'period': 'annual' | 'quarterly',
+            'revenue': float,
+            'net_income': float,
+            'eps': float
+        }, ...]
+        """
+        results = []
+        try:
+            ticker_symbol = symbol
+            if symbol.isdigit() and len(symbol) == 4:
+                ticker_symbol = f"{symbol}.T"
+            
+            ticker = yf.Ticker(ticker_symbol)
+            
+            def process_income_stmt(df, period):
+                if df is None or df.empty: return
+                
+                # Transpose so index is Date
+                # yfinance returns columns as Dates (Timestamp)
+                # rows as Metrics
+                
+                # Identify keys
+                keys = df.index.tolist()
+                
+                # Helper to find key efficiently
+                def get_val(date_col, pattern):
+                    # pattern matches index?
+                    # Exact match preferred
+                    # Common keys: 'Total Revenue', 'Net Income', 'Basic EPS', 'Diluted EPS'
+                    val = None
+                    if pattern in df.index:
+                        val = df.loc[pattern, date_col]
+                    return val
+
+                # Priority keys for EPS
+                eps_keys = ['Diluted EPS', 'Basic EPS']
+                
+                for date_val in df.columns:
+                    # date_val is Timestamp
+                    if pd.isna(date_val): continue
+                    
+                    rep_date = date_val.date()
+                    
+                    rev_keys = ['Total Revenue', 'Operating Revenue', 'Interest Income', 'Net Interest Income']
+                    rev = None
+                    for k in rev_keys:
+                        rev = get_val(date_val, k)
+                        if rev is not None: break
+                    
+                    ni_keys = ['Net Income', 'Net Income Common Stockholders', 'Net Income From Continuing And Discontinued Operation', 'Net Income From Continuing Operation Net Minority Interest', 'Normalized Income']
+                    ni = None
+                    for k in ni_keys:
+                        ni = get_val(date_val, k)
+                        if ni is not None: break
+                    
+                    eps = None
+                    for k in eps_keys:
+                        eps = get_val(date_val, k)
+                        if eps is not None: break
+                    
+                    # Store if we have at least revenue or income
+                    if rev is not None or ni is not None:
+                         # Ensure native types for JSON/DB
+                         record = {
+                             'date': rep_date,
+                             'period': period,
+                             'revenue': float(rev) if rev is not None and not pd.isna(rev) else None,
+                             'net_income': float(ni) if ni is not None and not pd.isna(ni) else None,
+                             'eps': float(eps) if eps is not None and not pd.isna(eps) else None
+                         }
+                         results.append(record)
+
+            # Annual
+            process_income_stmt(ticker.income_stmt, 'annual')
+            
+            # Quarterly
+            process_income_stmt(ticker.quarterly_income_stmt, 'quarterly')
+            
+            return results
+
+        except Exception as e:
+            logger.error(f"Error fetching financial history for {symbol}: {e}")
+            return []
 
     def get_stock_data(self, symbol, period="2y", interval="1d", force_refresh=False):
         """

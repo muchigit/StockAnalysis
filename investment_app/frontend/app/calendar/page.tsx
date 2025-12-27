@@ -58,7 +58,7 @@ export default function CalendarPage() {
         // Note: JS Date month is 0-indexed, events are YYYY-MM-DD
         const target = new Date(year, month, day);
         const dateStr = formatDate(target);
-        
+
         // Fix: API returns ISO string (e.g. 2026-01-28T00:00:00), we need to compare YYYY-MM-DD part.
         return events.filter(e => {
             if (!e.earnings_date) return false;
@@ -94,7 +94,7 @@ export default function CalendarPage() {
             grid.push(
                 <div key={`curr-${i}`} className={`bg-gray-900 min-h-[120px] p-2 border border-gray-800 transition hover:bg-gray-800/80 ${isToday ? 'ring-1 ring-blue-500 bg-blue-900/20' : ''}`}>
                     <div className={`text-right text-sm mb-2 ${isToday ? 'text-blue-400 font-bold' : 'text-gray-400'}`}>
-                        {i} {isToday && '(Today)'}
+                        {i} {isToday && '(本日)'}
                     </div>
                     <div className="space-y-1">
                         {dayEvents.map(e => (

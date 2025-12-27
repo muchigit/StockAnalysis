@@ -30,7 +30,7 @@ class FileImportRequest(BaseModel):
     file_paths: List[str]
 
 @router.post("/import/files")
-@router.post("/import/files")
+
 def import_files(request: FileImportRequest):
     """Import Finviz/IBD files or Moomoo CSVs synchronously"""
     print(f"[Automation Router] Received import request: {request.file_paths}")

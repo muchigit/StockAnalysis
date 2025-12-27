@@ -94,7 +94,7 @@ def scheduler_loop():
 @app.on_event("startup")
 def start_scheduler():
     t = threading.Thread(target=scheduler_loop, daemon=True)
-    t.start()
+    # t.start() # Temporarily disabled for debugging
 
 @app.get("/")
 def read_root():

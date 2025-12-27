@@ -1,18 +1,20 @@
 "use client";
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { fetchStockDetail, fetchStockChart, fetchStockSignals, fetchStockHistory, fetchStockNote, saveStockNote, fetchStockAnalysis, deleteStock, Stock, ChartData, TradeHistory, StockNote, AnalysisResult, updateStock, fetchPrompts, fetchStockPriceHistory, GeminiPrompt, openFile, generateText, updateTradeNote, pickFile, AlertCondition, triggerVisualAnalysis, deleteAnalysisResult } from '@/lib/api';
+import { fetchStockDetail, fetchStockChart, fetchStockSignals, fetchStockHistory, fetchStockNote, saveStockNote, fetchStockAnalysis, deleteStock, Stock, StockGroup, fetchGroups, ChartData, TradeHistory, StockNote, AnalysisResult, updateStock, fetchPrompts, fetchStockPriceHistory, GeminiPrompt, openFile, generateText, updateTradeNote, pickFile, AlertCondition, triggerVisualAnalysis, deleteAnalysisResult, StockNews, fetchStockNews, refreshFinancials, StockFinancials, fetchStockFinancials } from '@/lib/api';
 import { addResearchTicker } from '@/lib/research-storage';
 import { SIGNAL_LABELS } from '@/lib/signals';
 import { StockChart } from '@/components/StockChart';
-import Toast from '@/components/Toast';
-import Link from 'next/link';
+import FinancialHistoryChart from '@/components/FinancialHistoryChart';
 import { useTranslation } from '@/lib/i18n';
 import { useParams, useRouter } from 'next/navigation';
 import AlertDialog from '@/components/AlertDialog';
+import AddToGroupDialog from '@/components/AddToGroupDialog';
 import { SeriesMarker } from 'lightweight-charts';
 import TradingDialog from '@/components/Trading/TradingDialog';
 import { getRatingColor } from '@/lib/utils';
+import Toast from '@/components/Toast';
 
 declare global {
     interface Window {
@@ -44,7 +46,6 @@ export default function StockDetailPage() {
     const [editingTradeNoteValue, setEditingTradeNoteValue] = useState("");
     const [loading, setLoading] = useState(true);
     const [savingNote, setSavingNote] = useState(false);
-    const [logScale, setLogScale] = useState(true); // Default to Log Scale
 
     // Prompts (Restored)
     const [prompts, setPrompts] = useState<GeminiPrompt[]>([]);
@@ -54,11 +55,18 @@ export default function StockDetailPage() {
     const [runningGemini, setRunningGemini] = useState(false);
 
     // Reports (New)
-    // Reports (New)
     const [refreshingAnalysis, setRefreshingAnalysis] = useState(false);
     const [isTradingOpen, setIsTradingOpen] = useState(false);
     const [showAlertDialog, setShowAlertDialog] = useState(false);
     const [initialAlertCondition, setInitialAlertCondition] = useState<AlertCondition | undefined>(undefined);
+    const [isAddToGroupDialogOpen, setIsAddToGroupDialogOpen] = useState(false);
+    const [news, setNews] = useState<StockNews[]>([]);
+    const [financials, setFinancials] = useState<StockFinancials[]>([]);
+    const [refreshingFinancialsState, setRefreshingFinancialsState] = useState(false);
+    const [financialTab, setFinancialTab] = useState<'metrics' | 'history'>('metrics');
+
+    // Chart State
+    const [logScale, setLogScale] = useState(false);
 
     useEffect(() => {
         if (symbol) {
@@ -69,7 +77,7 @@ export default function StockDetailPage() {
     async function loadData(sym: string) {
         setLoading(true);
         try {
-            const [s, cDaily, cWeekly, sig, h, n, a, p] = await Promise.all([
+            const [s, cDaily, cWeekly, sig, h, n, a, p, newsData, finData] = await Promise.all([
                 fetchStockDetail(sym),
                 fetchStockChart(sym, '5y', '1d'), // Fetch 5y for daily
                 fetchStockChart(sym, '10y', '1wk'), // Fetch 10y for weekly
@@ -77,7 +85,9 @@ export default function StockDetailPage() {
                 fetchStockHistory(sym),
                 fetchStockNote(sym),
                 fetchStockAnalysis(sym),
-                fetchPrompts()
+                fetchPrompts(),
+                fetchStockNews(sym),
+                fetchStockFinancials(sym)
             ]);
             setStock(s);
             setChartDataDaily(cDaily);
@@ -89,6 +99,8 @@ export default function StockDetailPage() {
             setLastSavedNote(content);
             setAnalysis(a);
             setPrompts(p); // Assuming 8th element is prompts
+            setNews(newsData);
+            setFinancials(finData);
 
             // Restore last selected prompt
             const lastId = localStorage.getItem('lastSelectedPromptId');
@@ -106,6 +118,8 @@ export default function StockDetailPage() {
             setLoading(false);
         }
     }
+
+
 
     async function handleSaveNote() {
         if (!stock) return;
@@ -223,6 +237,27 @@ export default function StockDetailPage() {
             alert("更新に失敗しました: " + e);
         } finally {
             setRefreshingAnalysis(false);
+        }
+    }
+
+    async function handleRefreshFinancials() {
+        if (!stock) return;
+        setRefreshingFinancialsState(true);
+        try {
+            // 1. Trigger backend refresh
+            const updatedStock = await refreshFinancials(stock.symbol);
+            setStock(updatedStock);
+
+            // 2. Fetch fresh financials
+            const newFinancials = await fetchStockFinancials(stock.symbol);
+            setFinancials(newFinancials);
+
+            setToastMsg('財務情報を更新しました');
+        } catch (e) {
+            console.error(e);
+            alert("更新に失敗しました: " + e);
+        } finally {
+            setRefreshingFinancialsState(false);
         }
     }
 
@@ -449,7 +484,15 @@ export default function StockDetailPage() {
                         className="opacity-80 hover:opacity-100 transition mr-4"
                         title={t('addToDeepResearch')}
                     >
-                        <span className="text-sm bg-purple-600 text-white px-2 py-1 rounded font-bold">🧠</span>
+                        <span className="text-xl">🧠</span>
+                    </button>
+
+                    <button
+                        onClick={() => setIsAddToGroupDialogOpen(true)}
+                        className="opacity-80 hover:opacity-100 transition mr-4"
+                        title="グループに追加"
+                    >
+                        <span className="text-xl">📁</span>
                     </button>
 
                     {/* Alert Button */}
@@ -502,7 +545,7 @@ export default function StockDetailPage() {
 
                     <button
                         onClick={async () => {
-                            if (confirm(t('confirmDeleteStock') || "Are you sure you want to delete " + stock.symbol + "?")) {
+                            if (confirm(t('confirmDeleteStock') || stock.symbol + " を削除してもよろしいですか？")) {
                                 try {
                                     await deleteStock(stock.symbol);
                                     router.push('/');
@@ -513,7 +556,7 @@ export default function StockDetailPage() {
                         }}
                         className="px-3 py-1 bg-red-900/50 text-red-400 border border-red-700 hover:bg-red-800 transition-colors rounded text-sm font-bold ml-4"
                     >
-                        {t('delete') || 'Delete'}
+                        {t('delete') || '削除'}
                     </button>
                 </div >
             </div >
@@ -525,7 +568,31 @@ export default function StockDetailPage() {
                 <div className="flex flex-wrap gap-x-4 gap-y-2 items-center bg-gray-800 rounded-xl px-4 py-2 border border-gray-700 text-xs shadow-sm">
                     {stock.asset_type !== 'index' && (
                         <>
-                            {/* Status & Qty */}
+                            <div className="bg-gray-800 p-2 rounded text-center min-w-[80px]">
+                                <div className="text-gray-400 text-xs text-nowrap">株価</div>
+                                <div className="text-white font-bold text-xl text-nowrap">{stock.current_price ? stock.current_price.toLocaleString() : '-'}</div>
+                            </div>
+                            <div className="bg-gray-800 p-2 rounded text-center min-w-[80px]">
+                                <div className="text-gray-400 text-xs text-nowrap">前日比</div>
+                                <span className={"font-bold text-xl text-nowrap " + ((stock.change_percentage_1d || 0) > 0 ? "text-red-400" : (stock.change_percentage_1d || 0) < 0 ? "text-blue-400" : "text-white")}>
+                                    {stock.change_percentage_1d ? (stock.change_percentage_1d > 0 ? "+" : "") + stock.change_percentage_1d.toFixed(2) + "%" : "-"}
+                                </span>
+                            </div>
+                            <div className="bg-gray-800 p-2 rounded text-center min-w-[80px]">
+                                <div className="text-gray-400 text-xs text-nowrap">出来高</div>
+                                <div className="text-white font-bold text-xl text-nowrap">{stock.volume ? stock.volume.toLocaleString() : '-'}</div>
+                            </div>
+                            <div className="bg-gray-800 p-2 rounded text-center min-w-[80px]">
+                                <div className="text-gray-400 text-xs text-nowrap">出来高増%</div>
+                                <span className={"font-bold text-xl text-nowrap " + ((stock.volume_increase_pct || 0) > 0 ? "text-red-400" : (stock.volume_increase_pct || 0) < 0 ? "text-blue-400" : "text-white")}>
+                                    {stock.volume_increase_pct ? (stock.volume_increase_pct > 0 ? "+" : "") + stock.volume_increase_pct.toFixed(1) + "%" : "-"}
+                                </span>
+                            </div>
+                            <div className="hidden md:block w-px h-3 bg-gray-600"></div>
+
+
+
+                            {/* Stock Note (Existing) */}
                             <div className="flex items-center gap-2">
                                 <span className="text-gray-500">{t('status')}:</span>
                                 <span className="font-bold">
@@ -569,6 +636,20 @@ export default function StockDetailPage() {
                                     }}
                                     colorClass={getRatingColor(stock.rs_rating)}
                                 />
+                                <div className="ml-2 flex items-center gap-3 border-l border-gray-600 pl-3">
+                                    <div className="flex flex-col items-center leading-tight bg-gray-900/50 p-1 rounded">
+                                        <span className="text-gray-500 text-[10px]">決算(直近)</span>
+                                        <span className="font-mono text-xs text-gray-300">
+                                            {stock.last_earnings_date ? new Date(stock.last_earnings_date).toISOString().split('T')[0] : '-'}
+                                        </span>
+                                    </div>
+                                    <div className="flex flex-col items-center leading-tight bg-gray-900/50 p-1 rounded">
+                                        <span className="text-gray-500 text-[10px]">決算(次回)</span>
+                                        <span className="font-mono text-xs text-gray-300">
+                                            {stock.next_earnings_date ? new Date(stock.next_earnings_date).toISOString().split('T')[0] : '-'}
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
 
                             <div className="hidden md:block w-px h-3 bg-gray-600"></div>
@@ -580,51 +661,18 @@ export default function StockDetailPage() {
                     {/* Changes (Grouped) */}
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-1" title={t('marketCap') || 'Market Cap'}>
-                            <span className="text-gray-500 text-sm">MC:</span>
+                            <span className="text-gray-500 text-sm">時価総額:</span>
                             <span className="font-mono text-sm text-gray-300">
                                 {stock.market_cap ? (Number(stock.market_cap) / 1e9).toFixed(2) + " B" : "-"}
                             </span>
                         </div>
                         <div className="hidden md:block w-px h-3 bg-gray-600"></div>
 
-                        <div className="flex items-center gap-1" title={t('volume') || 'Volume'}>
-                            <span className="text-gray-500 text-sm">Vol:</span>
-                            <span className="font-mono text-sm text-gray-300">
-                                {stock.volume ? Number(stock.volume).toLocaleString() : '-'}
-                            </span>
-                        </div>
-
-                        <div className="flex items-center gap-1" title={t('volumeIncrease' as any) || 'Vol Inc %'}>
-                            <span className="text-gray-500 text-sm">出来高増%:</span>
-                            <span className={"font-mono text-sm " + ((stock.volume_increase_pct || 0) > 0 ? "text-red-400" : (stock.volume_increase_pct || 0) < 0 ? "text-blue-400" : "text-gray-300")}>
-                                {stock.volume_increase_pct ? (stock.volume_increase_pct > 0 ? "+" : "") + stock.volume_increase_pct.toFixed(1) + "%" : "-"}
-                            </span>
-                        </div>
-                        <div className="hidden md:block w-px h-3 bg-gray-600"></div>
-
-                        <div className="flex items-center gap-1" title={t('lastEarnings') || 'Last Earnings'}>
-                            <span className="text-gray-500 text-sm">決算(直近):</span>
-                            <span className="font-mono text-sm text-gray-300">
-                                {stock.last_earnings_date ? new Date(stock.last_earnings_date).toISOString().split('T')[0] : '-'}
-                            </span>
-                        </div>
-
-                        <div className="flex items-center gap-1" title={t('nextEarnings') || 'Next Earnings'}>
-                            <span className="text-gray-500 text-sm">決算(次回):</span>
-                            <span className="font-mono text-sm text-gray-300">
-                                {stock.next_earnings_date ? new Date(stock.next_earnings_date).toISOString().split('T')[0] : '-'}
-                            </span>
-                        </div>
-                        <div className="hidden md:block w-px h-3 bg-gray-600"></div>
 
 
 
-                        <div className="flex items-center gap-1" title="前日比">
-                            <span className="text-gray-500 text-sm">前日比:</span>
-                            <span className={"font-mono text-sm " + ((stock.change_percentage_1d || 0) > 0 ? "text-red-400" : (stock.change_percentage_1d || 0) < 0 ? "text-blue-400" : "text-gray-400")}>
-                                {stock.change_percentage_1d ? (stock.change_percentage_1d > 0 ? "+" : "") + stock.change_percentage_1d.toFixed(1) + "%" : "-"}
-                            </span>
-                        </div>
+
+
                         <div className="flex items-center gap-1" title={t('change5d')}>
                             <span className="text-gray-500 text-sm">5日比:</span>
                             <span className={"font-mono text-sm " + ((stock.change_percentage_5d || 0) > 0 ? "text-red-400" : (stock.change_percentage_5d || 0) < 0 ? "text-blue-400" : "text-gray-400")}>
@@ -798,8 +846,87 @@ export default function StockDetailPage() {
 
                         </div>
 
-                        <div>
-                            <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 h-full flex flex-col min-h-[400px]">
+                        <div className="space-y-6">
+                            {/* Financial Metrics Card (Moved) */}
+                            <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 min-h-[400px]">
+                                <div className="flex justify-between items-center mb-6">
+                                    <div className="flex space-x-4 border-b border-gray-600">
+                                        <button
+                                            className={`px-4 py-2 text-sm font-bold border-b-2 transition ${financialTab === 'metrics' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                            onClick={() => setFinancialTab('metrics')}
+                                        >
+                                            📊 財務指標
+                                        </button>
+                                        <button
+                                            className={`px-4 py-2 text-sm font-bold border-b-2 transition ${financialTab === 'history' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                            onClick={() => setFinancialTab('history')}
+                                        >
+                                            📈 業績推移
+                                        </button>
+                                    </div>
+                                    <button
+                                        onClick={handleRefreshFinancials}
+                                        disabled={refreshingFinancialsState}
+                                        className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition disabled:opacity-50"
+                                    >
+                                        {refreshingFinancialsState ? '更新中...' : '更新 🔄'}
+                                    </button>
+                                </div>
+
+                                {financialTab === 'metrics' ? (
+                                    <div className="grid grid-cols-2 gap-x-4 gap-y-6">
+                                        <div>
+                                            <div className="text-gray-400 text-sm mb-1">予想PER</div>
+                                            <div className="font-mono text-xl text-white">{stock.forward_pe ? stock.forward_pe.toFixed(2) : '-'}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-gray-400 text-sm mb-1">実績PER</div>
+                                            <div className="font-mono text-xl text-white">{stock.trailing_pe ? stock.trailing_pe.toFixed(2) : '-'}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-gray-400 text-sm mb-1">PBR</div>
+                                            <div className="font-mono text-xl text-white">{stock.price_to_book ? stock.price_to_book.toFixed(2) : '-'}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-gray-400 text-sm mb-1">配当利回り</div>
+                                            <div className="font-mono text-xl text-green-400">{stock.dividend_yield ? (stock.dividend_yield * 100).toFixed(2) + '%' : '-'}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-gray-400 text-sm mb-1">ROE</div>
+                                            <div className="font-mono text-xl text-white">{stock.return_on_equity ? (stock.return_on_equity * 100).toFixed(2) + '%' : '-'}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-gray-400 text-sm mb-1">売上成長率</div>
+                                            <div className={`font-mono text-xl ${(stock.revenue_growth || 0) > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                                {stock.revenue_growth ? (stock.revenue_growth * 100).toFixed(2) + '%' : '-'}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div className="text-gray-400 text-sm mb-1">目標株価(平均)</div>
+                                            <div className="font-mono text-xl text-white">{stock.target_mean_price ? stock.target_mean_price.toLocaleString() : '-'}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-gray-400 text-sm mb-1">52週高値/安値</div>
+                                            <div className="font-mono text-sm text-white">
+                                                <span className="text-red-300">H: {stock.high_52_week?.toLocaleString() || '-'}</span><br />
+                                                <span className="text-blue-300">L: {stock.low_52_week?.toLocaleString() || '-'}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="h-full">
+                                        {financials.length > 0 ? (
+                                            <FinancialHistoryChart data={financials} />
+                                        ) : (
+                                            <div className="h-40 flex items-center justify-center text-gray-500 italic">
+                                                データがありません。更新ボタンを押してください。
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 flex flex-col min-h-[400px]">
                                 <h2 className="text-xl font-bold mb-4 text-gray-300">{t('myNotes')}</h2>
                                 <textarea
                                     className="w-full bg-gray-900 border border-gray-600 rounded p-3 text-gray-300 focus:border-blue-500 focus:outline-none h-48 mb-4 resize-none text-[14pt] leading-relaxed"
@@ -904,7 +1031,7 @@ export default function StockDetailPage() {
                                                 <div className="mb-4 p-4 bg-blue-900/20 rounded border border-blue-700/50">
                                                     <div className="flex justify-between items-center">
                                                         <div>
-                                                            <div className="text-xs text-blue-400 font-bold mb-1">🔗 手動紐付けファイル</div>
+                                                            <div className="text-xs text-blue-400 font-bold mb-1">📄 最新分析レポート (Google Doc)</div>
                                                             <div className="text-sm text-gray-300 break-all">{stock.analysis_file_path}</div>
                                                         </div>
                                                         <button
@@ -928,7 +1055,7 @@ export default function StockDetailPage() {
                                                     {analysis.map((a) => (
                                                         <div key={a.id} className="p-4 bg-gray-900 rounded border border-gray-700 relative group">
                                                             <div className="flex justify-between items-start mb-2">
-                                                                <div className="text-xs text-gray-500">{new Date(a.created_at).toLocaleString()}</div>
+                                                                <div className="text-xs text-gray-500">{new Date(a.created_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}</div>
                                                                 <div className="flex gap-2">
                                                                     {a.file_path && (
                                                                         <button
@@ -1126,7 +1253,55 @@ export default function StockDetailPage() {
                         </div>
                     </div>
                 </div>
-                {/* Content Grid */}
+
+                {/* News Section */}
+
+                <div className="mt-8">
+                    <h2 className="text-2xl font-bold mb-4 text-gray-300 flex items-center gap-2">
+                        📰 関連ニュース <span className="text-sm font-normal text-gray-500">(yfinance)</span>
+                    </h2>
+                    {news.length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {news.map((item, i) => (
+                                <a
+                                    key={i}
+                                    href={item.link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="block bg-gray-800 rounded-xl border border-gray-700 hover:bg-gray-750 hover:border-blue-500 transition overflow-hidden group h-full flex flex-col"
+                                >
+                                    {item.thumbnail_url && (
+                                        <div className="h-40 w-full bg-black overflow-hidden relative">
+                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                            <img src={item.thumbnail_url} alt={item.title} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition duration-500 transform group-hover:scale-105" />
+                                        </div>
+                                    )}
+                                    <div className="p-4 flex flex-col flex-1">
+                                        <div className="text-xs text-blue-400 mb-2 font-bold uppercase tracking-wider">
+                                            {item.publisher} • {new Date(item.provider_publish_time).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+                                        </div>
+                                        <h3 className="text-lg font-bold text-gray-200 group-hover:text-blue-400 transition mb-3 line-clamp-2">
+                                            {item.title}
+                                        </h3>
+                                        <div className="flex flex-wrap gap-2 mt-auto">
+                                            {item.related_tickers && item.related_tickers.slice(0, 3).map(tick => (
+                                                <span key={tick} className="text-xs bg-gray-900 px-2 py-1 rounded text-gray-500 border border-gray-800">
+                                                    {tick}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </a>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-gray-500 italic p-8 bg-gray-800 rounded-xl border border-gray-700 text-center">
+                            ニュースが見つかりませんでした。
+                        </div>
+                    )}
+                </div>
+
+                {/* Content Grid End */}
                 <TradingDialog
                     isOpen={isTradingOpen}
                     onClose={() => setIsTradingOpen(false)}
@@ -1143,6 +1318,14 @@ export default function StockDetailPage() {
                     initialCondition={initialAlertCondition}
                     onSuccess={() => alert("アラートを作成しました")}
                 />
+
+                {stock && (
+                    <AddToGroupDialog
+                        symbol={stock.symbol}
+                        isOpen={isAddToGroupDialogOpen}
+                        onClose={() => setIsAddToGroupDialogOpen(false)}
+                    />
+                )}
             </div>
         </main >
     );

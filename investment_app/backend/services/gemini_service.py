@@ -184,8 +184,10 @@ class GeminiService:
              result_text = self._scrape_latest_response(driver)
              
         except Exception as e:
-            logger.error(f"Generation error: {e}")
-            result_text = f"Error: {e}"
+            import traceback
+            tb = traceback.format_exc()
+            logger.error(f"Generation error: {e}\n{tb}")
+            result_text = f"Error: Message: {e}\nStacktrace: {tb}"
         finally:
              # Do NOT quit driver as it closes the persistent browser instance
              # driver.quit()
@@ -195,33 +197,190 @@ class GeminiService:
 
     def _scrape_latest_response(self, driver):
         try:
-            # Common selector for Gemini responses (may change)
-            # Strategy: Get all elements that look like message text
-            # Usually they are inside <message-content> or have specific attributes
-            # We'll try to get all text from the main scrollable area, filtering out user prompts
+            # Strategy: Try multiple selectors as Gemini UI updates frequently
             
-            # Selector for the model response text container. This is tricky without live inspection.
-            # Assuming 'model-response-text' or similar class is not consistent.
-            # However, usually there are valid block elements.
+            # Selector 1: Standard class (often used)
+            responses = driver.find_elements(By.CSS_SELECTOR, ".model-response-text")
+            if responses:
+                return responses[-1].text
             
-            # Let's try grabbing all 'p', 'li', 'pre' in the chat history container
-            # But we only want the LAST message.
+            # Selector 2: Message Content Tag (Angular/Lit)
+            responses = driver.find_elements(By.TAG_NAME, "message-content")
+            if responses:
+                return responses[-1].text
+                
+            # Selector 3: Model Response Tag
+            responses = driver.find_elements(By.TAG_NAME, "model-response")
+            if responses:
+                return responses[-1].text
+
+            # Selector 4: Data attribute (more stable)
+            responses = driver.find_elements(By.XPATH, "//*[@data-test-id='model-response']")
+            if responses:
+                return responses[-1].text
+
+            # Selector 5: Markdown Renderer (Common in new UI)
+            responses = driver.find_elements(By.CLASS_NAME, "markdown-renderer")
+            if responses:
+                 return responses[-1].text
             
-            # Alternative: text of the last element with 'data-test-id="model-response"'?
-            # Or just return everything after the last user prompt?
+            # Selector 6: Class containing message-content
+            responses = driver.find_elements(By.XPATH, "//*[contains(@class, 'message-content')]")
+            if responses:
+                return responses[-1].text
+
+            # Generic fallback: Look for any substantial text block after the last user query?
+            # Hard to do without identifying user query.
             
-            # Simple fallback: Get full page text and try to extract? No.
+            # Debug: Capture body text snippet
+            body_text = driver.find_element(By.TAG_NAME, "body").text[:500]
+            logger.error(f"Failed to find response. Body start: {body_text}")
             
-            # Attempt 1: Selenium finding generic message blocks
-            # This selector represents the response text container in some versions
-            responses = driver.find_elements(By.CSS_SELECTOR, ".model-response-text") 
-            if not responses:
-                 # Fallback
-                 return "Error: Could not locate response text in DOM."
-                 
-            return responses[-1].text
+            return "Error: Could not locate response text in DOM. UI structure may have changed."
+
         except Exception as e:
             return f"Scraping error: {e}"
+
+    def generate_content_with_image(self, prompt: str, image_path: str) -> str:
+        """
+        Generate content using Gemini with an image attachment (Multimodal).
+        """
+        driver = self._setup_driver()
+        if not driver:
+            return "Error: Driver setup failed"
+        
+        result_text = ""
+        try:
+             # 1. Reset
+             driver.get("https://gemini.google.com/?hl=ja")
+             time.sleep(3)
+
+             # 2. Upload Image
+             logger.info(f"Uploading image: {image_path}")
+             try:
+                 # 1. Handle Plus Button / Menu
+                 # Look for the button that toggles the upload menu
+                 # It usually has 'aria-label' containing "ファイルをアップロード" and "メニュー" (Menu)
+                 plus_xpath = "//button[contains(@aria-label, 'ファイルをアップロード') and contains(@aria-label, 'メニュー')]"
+                 
+                 try:
+                     plus_btns = driver.find_elements(By.XPATH, plus_xpath)
+                     if plus_btns:
+                         plus_btn = plus_btns[0]
+                         current_label = plus_btn.get_attribute("aria-label") or ""
+                         logger.info(f"Found Plus button: {current_label}")
+                         
+                         if "閉じる" in current_label or "Close" in current_label:
+                             logger.info("Menu appears to be open. Skipping click.")
+                         else:
+                             plus_btn.click()
+                             time.sleep(1)
+                     else:
+                         # Fallback to generic Plus button search if specific label not found
+                         logger.warning("Specific Plus button not found, trying generic search.")
+                         generic_plus = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, "//button[.//span[text()='+']]")))
+                         generic_plus.click()
+                         time.sleep(1)
+                 except Exception as e:
+                     logger.warning(f"Plus button interaction issue: {e}")
+
+                 # 2. Find File Input (Shadow DOM support)
+                 # We DO NOT click the "Upload File" menu item button because that opens the native OS dialog.
+                 # Instead, we look for the hidden file input that should be present when the menu is active.
+                 
+                 # Debug: Check where we are
+                 logger.info(f"Current Page: {driver.title} ({driver.current_url})")
+                 
+                 find_input_js = """
+                    function findFileInput(root) {
+                        if (!root) return null;
+                        const input = root.querySelector && root.querySelector("input[type='file']");
+                        if (input) return input;
+                        if (root.shadowRoot) {
+                            const found = findFileInput(root.shadowRoot);
+                            if (found) return found;
+                        }
+                        const children = root.querySelectorAll("*");
+                        for (let child of children) {
+                            if (child.shadowRoot) {
+                                const found = findFileInput(child.shadowRoot);
+                                if (found) return found;
+                            }
+                        }
+                        return null;
+                    }
+                    return findFileInput(document.body);
+                 """
+                 
+                 # Poll for the input
+                 file_input = None
+                 for i in range(5):
+                     file_input = driver.execute_script(find_input_js)
+                     if file_input:
+                         break
+                     time.sleep(1)
+                 
+                 if file_input:
+                     file_input.send_keys(image_path)
+                     logger.info("Image path sent to file input.")
+                 else:
+                     # Debug: List ALL inputs to log
+                     debug_inputs_js = """
+                        function listInputs(root, list = []) {
+                            if (!root) return list;
+                            const inputs = root.querySelectorAll && root.querySelectorAll("input");
+                            if (inputs) {
+                                inputs.forEach(i => list.push(`Type: ${i.type}, ID: ${i.id}, Class: ${i.className}, Visible: ${i.offsetParent !== null}`));
+                            }
+                            if (root.shadowRoot) {
+                                listInputs(root.shadowRoot, list);
+                            }
+                            const children = root.querySelectorAll("*");
+                            for (let child of children) {
+                                if (child.shadowRoot) {
+                                    listInputs(child.shadowRoot, list);
+                                }
+                            }
+                            return list;
+                        }
+                        return listInputs(document.body);
+                     """
+                     found_inputs = driver.execute_script(debug_inputs_js)
+                     logger.error(f"Failed to find input[type='file']. Found inputs: {found_inputs}")
+                     raise Exception(f"Could not locate input[type='file']. Found {len(found_inputs)} other inputs.")
+
+             except Exception as e:
+                 logger.error(f"Upload failed: {e}")
+                 # Debug: Save screenshot
+                 try:
+                    driver.save_screenshot("upload_error_debug.png")
+                 except: pass
+                 return f"Error uploading image: {e}"
+
+             # Wait for upload to complete
+             time.sleep(10)
+             
+             # 3. Input Prompt
+             self._input_prompt(driver, prompt)
+
+             # 4. Send
+             self._click_send(driver)
+             
+             # 5. Wait for completion
+             logger.info("Waiting for generation to complete...")
+             send_button_xpath = "//button[contains(@aria-label, 'プロンプトを送信')]"
+             WebDriverWait(driver, 120).until(
+                 EC.element_to_be_clickable((By.XPATH, send_button_xpath))
+             )
+             
+             time.sleep(2) 
+             result_text = self._scrape_latest_response(driver)
+             
+        except Exception as e:
+            logger.error(f"Image generation error: {e}")
+            result_text = f"Error: {e}"
+            
+        return result_text
 
     def _scrape_response(self, driver):
         return self._scrape_latest_response(driver)

@@ -28,6 +28,13 @@ export interface FilterCriteria {
     min_composite_rating?: number;
     min_rs_rating?: number;
     min_atr?: number;
+
+    // Financials
+    min_forward_pe?: number;
+    max_forward_pe?: number;
+    min_dividend_yield?: number;
+    min_roe?: number;
+
     status?: string;
     industry?: string;
 }
@@ -157,6 +164,45 @@ export default function FilterDialog({ isOpen, onClose, onApply, onSaved, initia
                                 type="number"
                                 value={criteria.min_rs_rating || ''}
                                 onChange={(e) => handleChange('min_rs_rating', e.target.value ? parseInt(e.target.value) : undefined)}
+                                className="w-full bg-gray-700 text-white rounded px-2 py-1 border border-gray-600"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs text-gray-500 mb-1">予想PER (Min - Max)</label>
+                            <div className="flex gap-1">
+                                <input
+                                    type="number"
+                                    placeholder="Min"
+                                    value={criteria.min_forward_pe || ''}
+                                    onChange={(e) => handleChange('min_forward_pe', e.target.value ? parseFloat(e.target.value) : undefined)}
+                                    className="w-1/2 bg-gray-700 text-white rounded px-2 py-1 border border-gray-600"
+                                />
+                                <input
+                                    type="number"
+                                    placeholder="Max"
+                                    value={criteria.max_forward_pe || ''}
+                                    onChange={(e) => handleChange('max_forward_pe', e.target.value ? parseFloat(e.target.value) : undefined)}
+                                    className="w-1/2 bg-gray-700 text-white rounded px-2 py-1 border border-gray-600"
+                                />
+                            </div>
+                        </div>
+                        <div>
+                            <label className="block text-xs text-gray-500 mb-1">配当利回り(%) 最小</label>
+                            <input
+                                type="number"
+                                step="0.1"
+                                value={criteria.min_dividend_yield !== undefined ? criteria.min_dividend_yield * 100 : ''}
+                                onChange={(e) => handleChange('min_dividend_yield', e.target.value ? parseFloat(e.target.value) / 100 : undefined)}
+                                className="w-full bg-gray-700 text-white rounded px-2 py-1 border border-gray-600"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs text-gray-500 mb-1">ROE(%) 最小</label>
+                            <input
+                                type="number"
+                                step="0.1"
+                                value={criteria.min_roe !== undefined ? criteria.min_roe * 100 : ''}
+                                onChange={(e) => handleChange('min_roe', e.target.value ? parseFloat(e.target.value) / 100 : undefined)}
                                 className="w-full bg-gray-700 text-white rounded px-2 py-1 border border-gray-600"
                             />
                         </div>

@@ -3,6 +3,7 @@ from typing import List, Optional
 from sqlmodel import Session, select
 from datetime import datetime
 from ..database import get_session, StockGroup, StockGroupMember, Stock
+from ..schemas import StockResponse
 
 router = APIRouter(prefix="/groups", tags=["groups"])
 
@@ -42,7 +43,7 @@ def delete_group(group_id: int, session: Session = Depends(get_session)):
 
 # --- Member Management ---
 
-@router.get("/{group_id}/members", response_model=List[Stock])
+@router.get("/{group_id}/members", response_model=List[StockResponse])
 def list_group_members(group_id: int, session: Session = Depends(get_session)):
     # Verify group exists
     group = session.get(StockGroup, group_id)
@@ -50,10 +51,38 @@ def list_group_members(group_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Group not found")
         
     # Join Member -> Stock
-    # Ideally: Select Stock where Stock.symbol in (Select symbol from Member where group_id = ID)
     statement = select(Stock).join(StockGroupMember, Stock.symbol == StockGroupMember.symbol).where(StockGroupMember.group_id == group_id)
     stocks = session.exec(statement).all()
-    return stocks
+    
+    # Calculate Holdings for these stocks
+    target_symbols = [s.symbol for s in stocks]
+    
+    # Fetch trades to calc holdings
+    # Simplified logic: just sum buy/sell for quantity
+    from ..database import TradeHistory
+    trades = session.exec(select(TradeHistory.symbol, TradeHistory.trade_type, TradeHistory.quantity).where(TradeHistory.symbol.in_(target_symbols))).all()
+    
+    holdings = {}
+    for (sym, t_type, qty) in trades:
+        if sym not in holdings: holdings[sym] = 0.0
+        if t_type == '買い': holdings[sym] += qty
+        elif t_type == '売り': holdings[sym] -= qty # Assumes t_type is valid
+    
+    response = []
+    for s in stocks:
+        qty = holdings.get(s.symbol, 0.0)
+        # Calculate unrealized PL if we have data?
+        # For now, let's just return quantity for Pie Chart.
+        # User requested "Asset Allocation". Value = qty * current_price.
+        
+        resp = StockResponse(
+            **s.dict(),
+            holding_quantity=qty,
+            status="Holding" if qty > 0.0001 else "None"
+        )
+        response.append(resp)
+        
+    return response
 
 @router.post("/{group_id}/members", response_model=StockGroupMember)
 def add_member(group_id: int, symbol: str, session: Session = Depends(get_session)):

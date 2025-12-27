@@ -2,9 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from sqlmodel import Session, select
 from datetime import datetime
-from ..database import get_session, Stock, TradeHistory
+from ..database import get_session, Stock, TradeHistory, StockNews, StockFinancials
 from ..services.stock_service import stock_service
 from ..services.signals import get_signal_functions
+from ..services.gemini_service import gemini_service
+from ..services.chart_generator import chart_generator
 import pandas as pd
 import json
 
@@ -22,17 +24,7 @@ class StockUpdateRequest(BaseModel):
     # For now, we auto-set date on update or allow manual? Requirement said "save button updates with current date"
 
 
-class StockResponse(Stock):
-    holding_quantity: float = 0.0
-    trade_count: int = 0
-    status: str = "None" # "Holding", "Past Trade", "None"
-    last_buy_date: Optional[str] = None
-    last_sell_date: Optional[str] = None
-    realized_pl: Optional[float] = 0.0
-    unrealized_pl: Optional[float] = 0.0
-    average_cost: Optional[float] = 0.0
-    note: Optional[str] = None
-    latest_analysis: Optional[str] = None
+from ..schemas import StockResponse
 
 @router.get("/", response_model=List[StockResponse])
 def list_stocks(
@@ -40,6 +32,7 @@ def list_stocks(
     limit: int = 2000, 
     asset_type: str = "stock", 
     show_hidden_only: bool = False,
+    lite: bool = False,
     session: Session = Depends(get_session)
 ):
     # Fetch stocks
@@ -54,6 +47,60 @@ def list_stocks(
         
     stocks = session.exec(query).all()
     
+    if lite:
+        # Fast path for Heatmap/etc.
+        # We need holding status for highlighting, but P&L is heavy.
+        # Efficient strategy: Get all symbols with non-zero holdings first.
+        # or simplified loop.
+        
+        # 1. Fetch current holdings map (aggregated)
+        # To avoid heavy P&L loop, just sum trade qtys per symbol.
+        target_symbols = [s.symbol for s in stocks]
+        
+        # This is a bit inefficient to run for every heatmap fetch if we have 5000 stocks...
+        # But SQL sum is fast.
+        # However, for 2000 stocks, `IN` clause is big.
+        # Better: Fetches all trades for these stocks is what we avoided. 
+        # Is there a "CurrentHoldings" view? No.
+        # TradeHistory has all trades.
+        # Let's do a simplified query: SELECT symbol, SUM(CASE WHEN type='Buy' THEN qty ELSE -qty END) ... 
+        # But types are Japanese string '買い', '売り'.
+        
+        # Use Python set for holdings if total dataset isn't huge? 
+        # Or, just accept that Lite mode returns holding_qty=0 for now vs user requirement.
+        # User WANTS holding highlight.
+        
+        # Compromise: Fetch ONLY trades for the requested stocks (target_symbols) and compute quantity only.
+        # Skip notes, skip GDrive, skip analysis, skip complex P&L.
+        
+        trades = session.exec(select(TradeHistory.symbol, TradeHistory.trade_type, TradeHistory.quantity).where(TradeHistory.symbol.in_(target_symbols))).all()
+        
+        holdings = {}
+        for (sym, t_type, qty) in trades:
+            if sym not in holdings: holdings[sym] = 0.0
+            if t_type == '買い': holdings[sym] += qty
+            elif t_type == '売り': holdings[sym] -= qty
+            
+        response = []
+        for s in stocks:
+            qty = holdings.get(s.symbol, 0.0)
+            
+            resp = StockResponse(
+                **s.dict(),
+                holding_quantity=qty, # Pass actual qty
+                trade_count=0,
+                status="Holding" if qty > 0.0001 else "None",
+                last_buy_date=None,
+                last_sell_date=None, 
+                realized_pl=0.0,
+                unrealized_pl=0.0,
+                average_cost=0.0,
+                note=None,
+                latest_analysis=None
+            )
+            response.append(resp)
+        return response
+
     # Calculate holdings for these stocks
     # Note: For strict correctness, we should query all history or group by symbol.
     # Since we paginate stocks, we can filter history by these symbols OR just fetch aggregate for all (if dataset small).
@@ -595,7 +642,23 @@ def get_analysis_history(symbol: str, session: Session = Depends(get_session)):
     combined = manual_results + list(db_results) + gdrive_results
     combined.sort(key=lambda x: x.created_at or datetime.min, reverse=True)
     
+    combined = manual_results + list(db_results) + gdrive_results
+    combined.sort(key=lambda x: x.created_at or datetime.min, reverse=True)
+    
     return combined
+
+@router.delete("/{symbol}/analysis/{analysis_id}")
+def delete_analysis_result(symbol: str, analysis_id: int, session: Session = Depends(get_session)):
+    analysis = session.get(AnalysisResult, analysis_id)
+    if not analysis:
+        # It might be a GDrive result (negative ID) or just missing
+        if analysis_id < 0:
+             raise HTTPException(status_code=400, detail="Cannot delete external GDrive reports from here.")
+        raise HTTPException(status_code=404, detail="Analysis result not found")
+        
+    session.delete(analysis)
+    session.commit()
+    return {"status": "deleted", "id": analysis_id}
 
 @router.post("/{symbol}/analysis/trigger")
 def trigger_analysis(symbol: str):
@@ -604,3 +667,173 @@ def trigger_analysis(symbol: str):
     # In real implementation, this would queue a background task
     return {"status": "Analysis triggered (Placeholder)"}
 
+
+@router.post("/{symbol}/analysis/visual", response_model=AnalysisResult)
+def trigger_visual_analysis(symbol: str, session: Session = Depends(get_session)):
+    # 1. Get Data
+    df = stock_service.get_stock_data(symbol, period="1y", interval="1d")
+    if df.empty:
+        raise HTTPException(status_code=404, detail="Stock data not found")
+        
+    # 2. Generate Chart
+    # Use 1y period for good pattern context
+    chart_path = chart_generator.generate_chart_image(symbol, df, period_label="1 Year Daily")
+    if not chart_path:
+        raise HTTPException(status_code=500, detail="Failed to generate chart image")
+        
+    # 3. Call Gemini
+    prompt = """
+    Please analyze this stock chart image.
+    1. Identify the primary trend (Uptrend, Downtrend, Consolidation).
+    2. Identify any visible chart patterns (e.g., Cup with Handle, Double Bottom, Head and Shoulders, Base Formation, Tight Areas).
+    3. Observe the relationship between price and Moving Averages (5, 20, 50, 200).
+    4. Observe Volume anomalies.
+    
+    Provide a "Bullish", "Bearish", or "Neutral" rating and a concise analysis summary strictly in Japanese.
+    Format using Markdown.
+    """
+    
+    result_text = gemini_service.generate_content_with_image(prompt, chart_path)
+    
+    if "Error" in result_text and len(result_text) < 50:
+         raise HTTPException(status_code=500, detail=result_text)
+    
+    # 4. Save Result
+    analysis = AnalysisResult(
+        symbol=symbol,
+        content=result_text,
+        created_at=datetime.utcnow(),
+        file_path=chart_path 
+    )
+    session.add(analysis)
+    session.commit()
+    session.refresh(analysis)
+    
+    return analysis
+
+@router.post("/{symbol}/refresh_financials", response_model=Stock)
+def refresh_financials(symbol: str, session: Session = Depends(get_session)):
+    stock = session.get(Stock, symbol)
+    if not stock:
+         raise HTTPException(status_code=404, detail="Stock not found")
+    
+    # Fetch from service
+    metrics = None
+    try:
+        metrics = stock_service.fetch_fundamentals(symbol)
+    except Exception as e:
+        print(f"Error fetching fundamentals for {symbol}: {e}")
+
+    if metrics:
+        # Update Fields
+        # metrics keys should match Stock fields or be mapped
+        for key, val in metrics.items():
+            if hasattr(stock, key) and val is not None:
+                 setattr(stock, key, val)
+    else:
+        print(f"No fundamentals found for {symbol}")
+             
+    stock.updated_at = datetime.utcnow()
+    session.add(stock)
+    session.commit()
+    session.refresh(stock)
+
+    # --- Financial History Sync ---
+    try:
+        history_data = stock_service.fetch_financial_history(symbol)
+        if history_data:
+            for rec in history_data:
+                # Upsert
+                stmt = select(StockFinancials).where(
+                    StockFinancials.symbol == symbol,
+                    StockFinancials.report_date == rec['date'],
+                    StockFinancials.period == rec['period']
+                )
+                existing = session.exec(stmt).first()
+                if existing:
+                    existing.revenue = rec['revenue']
+                    existing.net_income = rec['net_income']
+                    existing.eps = rec['eps']
+                    session.add(existing)
+                else:
+                    new_rec = StockFinancials(
+                        symbol=symbol,
+                        report_date=rec['date'], # Map date -> report_date
+                        period=rec['period'],
+                        revenue=rec['revenue'],
+                        net_income=rec['net_income'],
+                        eps=rec['eps']
+                    )
+                    session.add(new_rec)
+            session.commit()
+    except Exception as e:
+        print(f"Error syncing financial history: {e}")
+        # Non-blocking, return stock anyway
+    
+    session.refresh(stock)
+    return stock
+
+@router.get("/{symbol}/financials", response_model=List[StockFinancials])
+def get_stock_financials(symbol: str, session: Session = Depends(get_session)):
+    query = select(StockFinancials).where(StockFinancials.symbol == symbol).order_by(StockFinancials.report_date.asc())
+    results = session.exec(query).all()
+    return results
+
+@router.get("/{symbol}/news", response_model=List[StockNews])
+def get_stock_news(symbol: str, session: Session = Depends(get_session)):
+    # 1. Check DB for recent news (e.g. < 24h old?)
+    # For simplicity, just get latest 20. If empty, fetch.
+    # User might want "Force Refresh" button for news too? 
+    # Let's auto-fetch if empty or very old.
+    
+    # Get stored news
+    news_items = session.exec(select(StockNews).where(StockNews.symbol == symbol).order_by(StockNews.provider_publish_time.desc()).limit(50)).all()
+    
+    should_fetch = False
+    if not news_items:
+        should_fetch = True
+    else:
+        # Check staleness - if latest news is older than 6 hours?
+        latest = news_items[0].provider_publish_time
+        if (datetime.utcnow() - latest).total_seconds() > 6 * 3600:
+            should_fetch = True
+            
+    if should_fetch:
+        print(f"Fetching fresh news for {symbol}")
+        fetched = stock_service.fetch_news(symbol)
+        if fetched:
+             # Save to DB (deduplicate by link)
+             # First, get all links that we are about to insert to check against DB
+             fetched_links = [item['link'] for item in fetched]
+             
+             # Query existing links from DB (only those that match fetched)
+             # SQLite limit variable number? split if too many? 
+             # fetched is usually small (e.g. 10-20 items).
+             
+             stmt = select(StockNews.link).where(StockNews.link.in_(fetched_links))
+             existing_db_links = set(session.exec(stmt).all())
+             
+             new_count = 0
+             for item in fetched:
+                 if item['link'] not in existing_db_links:
+                     news_obj = StockNews(
+                         symbol=symbol,
+                         title=item['title'],
+                         publisher=item['publisher'],
+                         link=item['link'],
+                         provider_publish_time=item['provider_publish_time'],
+                         type=item['type'],
+                         thumbnail_url=item['thumbnail_url'],
+                         related_tickers_json=json.dumps(item['related_tickers'])
+                     )
+                     session.add(news_obj)
+                     # Add to set to prevent duplicates within the batch itself
+                     existing_db_links.add(item['link'])
+                     new_count += 1
+             
+             if new_count > 0:
+                 session.commit()
+                 # Re-fetch sorted
+                 news_items = session.exec(select(StockNews).where(StockNews.symbol == symbol).order_by(StockNews.provider_publish_time.desc()).limit(50)).all()
+                 
+    return news_items

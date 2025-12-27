@@ -1,6 +1,6 @@
 from sqlmodel import SQLModel, create_engine, Field, Session
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 
 import os
 
@@ -131,6 +131,31 @@ class Stock(SQLModel, table=True):
     analysis_file_path: Optional[str] = Field(default=None)
     analysis_linked_at: Optional[datetime] = None
 
+    # Financial Metrics (yfinance)
+    forward_pe: Optional[float] = None
+    trailing_pe: Optional[float] = None
+    price_to_book: Optional[float] = None
+    dividend_yield: Optional[float] = None
+    return_on_equity: Optional[float] = None
+    revenue_growth: Optional[float] = None
+    ebitda: Optional[float] = None
+    target_mean_price: Optional[float] = None
+    high_52_week: Optional[float] = None
+    low_52_week: Optional[float] = None
+
+
+
+class StockNews(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    symbol: str = Field(index=True)
+    title: str
+    publisher: str
+    link: str = Field(unique=True)
+    provider_publish_time: datetime
+    type: str # 'VIDEO', 'STORY', etc.
+    thumbnail_url: Optional[str] = None
+    related_tickers_json: str = Field(default="[]")
+
 class StockAlert(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     symbol: str = Field(index=True)
@@ -139,8 +164,21 @@ class StockAlert(SQLModel, table=True):
     current_stage_index: int = Field(default=0)
     is_active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    triggered: bool = False
     last_triggered_at: Optional[datetime] = None
-    triggered: bool = Field(default=False)
+
+class StockFinancials(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    symbol: str = Field(index=True)
+    report_date: date = Field(index=True)
+    period: str = Field(index=True) # 'annual' or 'quarterly'
+    revenue: Optional[float] = None
+    net_income: Optional[float] = None
+    eps: Optional[float] = None
+    
+    # Composite unique constraint would be ideal (symbol, date, period), 
+    # but SQLModel/SQLite handling for composite constraint is tricky in simple mode.
+    # We will enforce uniqueness via application logic or raw SQL if needed.
 
 class SavedFilter(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)

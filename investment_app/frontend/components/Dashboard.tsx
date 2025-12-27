@@ -53,9 +53,9 @@ export default function Dashboard({ showHiddenOnly = false }: DashboardProps) {
     // Column Definitions (Memoized for translation)
     const INITIAL_COLUMNS: ColumnDef[] = useMemo(() => [
         { key: 'is_buy_candidate', label: '買い', width: 50, sortable: true, header: '★' },
-        { key: 'symbol', label: (t('symbol' as any) || 'Symbol'), width: 80, sortable: true },
-        { key: 'company_name', label: t('companyName') || 'Company Name', width: 200, sortable: true },
-        { key: 'sector', label: t('sector') || 'Sector', width: 120, sortable: true }, { key: 'industry', label: t('industry') || '業界' },
+        { key: 'symbol', label: (t('symbol' as any) || 'シンボル'), width: 80, sortable: true },
+        { key: 'company_name', label: t('companyName') || '企業名', width: 200, sortable: true },
+        { key: 'sector', label: t('sector') || 'セクター', width: 120, sortable: true }, { key: 'industry', label: t('industry') || '業界' },
         { key: 'composite_rating', label: 'CR' },
         { key: 'rs_rating', label: 'RS' },
         { key: 'note', label: t('note') || 'メモ', width: 200 },
@@ -88,6 +88,15 @@ export default function Dashboard({ showHiddenOnly = false }: DashboardProps) {
         // Predictions
         { key: 'predicted_price_today', label: '推測値(前日)' },
         { key: 'predicted_price_next', label: '推測値(翌日)' },
+
+        // Financials (New)
+        { key: 'forward_pe', label: '予想PER', type: 'number', format: (v: number) => v?.toFixed(2), visible: false },
+        { key: 'trailing_pe', label: '実績PER', type: 'number', format: (v: number) => v?.toFixed(2), visible: false },
+        { key: 'price_to_book', label: 'PBR', type: 'number', format: (v: number) => v?.toFixed(2), visible: false },
+        { key: 'dividend_yield', label: '配当利回り', type: 'percentage', format: (v: number) => (v * 100)?.toFixed(2) + '%', visible: false },
+        { key: 'return_on_equity', label: 'ROE', type: 'percentage', format: (v: number) => (v * 100)?.toFixed(2) + '%', visible: false },
+        { key: 'revenue_growth', label: '売上成長率', type: 'percentage', format: (v: number) => (v * 100)?.toFixed(2) + '%', visible: false },
+
         // Signals
         { key: 'signal_base_formation', label: 'Base' },
         // Slopes
@@ -202,7 +211,8 @@ export default function Dashboard({ showHiddenOnly = false }: DashboardProps) {
     // Alert Dialog Initial Condition
     const [initialAlertCondition, setInitialAlertCondition] = useState<AlertCondition | undefined>(undefined);
 
-
+    // Context Menu State
+    const [contextMenu, setContextMenu] = useState<{ x: number, y: number, stock: Stock } | null>(null);
 
     // Initial Data Load
     useEffect(() => {
@@ -382,7 +392,7 @@ export default function Dashboard({ showHiddenOnly = false }: DashboardProps) {
 
     const handleNoteSave = async (symbol: string) => {
         try {
-            await updateStock(symbol, { note: editingNoteValue });
+            await saveStockNote(symbol, editingNoteValue);
             // Optimistic update
             setStocks(prev => prev.map(s => s.symbol === symbol ? { ...s, note: editingNoteValue } : s));
             setEditingNoteId(null);
@@ -595,6 +605,11 @@ export default function Dashboard({ showHiddenOnly = false }: DashboardProps) {
         });
     };
 
+    // Reset page when criteria changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [activeCriteria]);
+
     // Filtering Logic
     const filteredStocks = useMemo(() => {
         return stocks.filter(stock => {
@@ -645,6 +660,12 @@ export default function Dashboard({ showHiddenOnly = false }: DashboardProps) {
                 if (activeCriteria.min_composite_rating && (stock.composite_rating || 0) < activeCriteria.min_composite_rating) return false;
                 if (activeCriteria.min_rs_rating && (stock.rs_rating || 0) < activeCriteria.min_rs_rating) return false;
                 if (activeCriteria.min_atr && (stock.atr_14 || 0) < activeCriteria.min_atr) return false;
+
+                // Financials Filters
+                if (activeCriteria.min_forward_pe && (stock.forward_pe || 0) < activeCriteria.min_forward_pe) return false;
+                if (activeCriteria.max_forward_pe && (stock.forward_pe || 0) > activeCriteria.max_forward_pe) return false;
+                if (activeCriteria.min_dividend_yield && (stock.dividend_yield || 0) < activeCriteria.min_dividend_yield) return false;
+                if (activeCriteria.min_roe && (stock.return_on_equity || 0) < activeCriteria.min_roe) return false;
 
                 if (activeCriteria.is_in_uptrend && !stock.is_in_uptrend) return false;
                 if (activeCriteria.has_note && !stock.note) return false;
@@ -1316,7 +1337,7 @@ Market Cap: ${stock.market_cap}
                                         <span>🔄</span> {t('refresh')}
                                     </button>
                                     <button
-                                        onClick={() => { setIsMenuOpen(false); document.getElementById('import-file-menu')?.click(); }}
+                                        onClick={() => { setIsMenuOpen(false); handleImport(); }}
                                         className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-sm text-gray-200 flex items-center gap-2 transition"
                                     >
                                         <span>📥</span> {t('import')}
@@ -1348,6 +1369,12 @@ Market Cap: ${stock.market_cap}
                                         <span>🗺️</span> セクターマップ
                                     </button>
                                     <button
+                                        onClick={() => { setIsMenuOpen(false); router.push('/groups'); }}
+                                        className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-sm text-gray-200 flex items-center gap-2 transition"
+                                    >
+                                        <span>📁</span> グループ管理
+                                    </button>
+                                    <button
                                         onClick={() => { setIsMenuOpen(false); router.push('/historical-analysis'); }}
                                         className="w-full text-left px-3 py-2 hover:bg-gray-700 rounded text-sm text-gray-200 flex items-center gap-2 transition"
                                     >
@@ -1362,13 +1389,7 @@ Market Cap: ${stock.market_cap}
                                     </button>
                                 </div>
                                 {/* Hidden File Input for Menu */}
-                                <input
-                                    id="import-file-menu"
-                                    type="file"
-                                    accept=".csv"
-                                    className="hidden"
-                                    onChange={handleImport}
-                                />
+
                             </div>
                         )}
                     </div>
@@ -1416,6 +1437,27 @@ Market Cap: ${stock.market_cap}
                     </div>
 
                     <div className="h-8 w-px bg-gray-700 mx-2"></div>
+
+                    {/* Index Add Button (Restored) */}
+                    {activeTab === 'index' && (
+                        <div className="flex items-center gap-2 bg-purple-900/20 p-2 rounded border border-purple-700/50 mr-2">
+                            <input
+                                type="text"
+                                placeholder="Index ID (e.g. ^N225)"
+                                className="bg-gray-800 border border-purple-700 text-white rounded px-3 py-1 text-sm w-40 font-mono focus:outline-none focus:border-purple-500"
+                                value={indexSymbol}
+                                onChange={(e) => setIndexSymbol(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleAddIndex()}
+                            />
+                            <button
+                                onClick={handleAddIndex}
+                                className="px-3 py-1 bg-purple-700 hover:bg-purple-600 rounded text-sm font-bold text-white transition"
+                            >
+                                Add
+                            </button>
+                            {msg && <span className="text-xs text-purple-300 ml-2 animate-pulse">{msg}</span>}
+                        </div>
+                    )}
 
                     <div className="flex gap-2">
                         <button
@@ -1575,6 +1617,10 @@ Market Cap: ${stock.market_cap}
                                             key={stock.symbol}
                                             className="hover:bg-gray-800/50 transition duration-75 group cursor-pointer"
                                             onDoubleClick={() => router.push(`/stocks/${stock.symbol}`)}
+                                            onContextMenu={(e) => {
+                                                e.preventDefault();
+                                                setContextMenu({ x: e.pageX, y: e.pageY, stock });
+                                            }}
                                         >
                                             {visibleColumns.map(colKey => (
                                                 <td key={colKey} className="px-4 py-2 whitespace-nowrap">
@@ -1732,7 +1778,44 @@ Market Cap: ${stock.market_cap}
                     />
                 )
             }
+
+            {/* Context Menu */}
+            {contextMenu && (
+                <>
+                    <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => setContextMenu(null)}
+                        onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
+                    />
+                    <div
+                        className="absolute z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-hidden min-w-[160px]"
+                        style={{ top: contextMenu.y, left: contextMenu.x }}
+                    >
+                        <div className="p-2 border-b border-gray-700">
+                            <span className="text-xs text-gray-500 font-bold px-2">{contextMenu.stock.symbol}</span>
+                        </div>
+                        <button
+                            className="w-full text-left px-4 py-2 hover:bg-gray-700 text-sm flex items-center gap-2"
+                            onClick={() => {
+                                setAddToGroupSymbol(contextMenu.stock.symbol);
+                                setIsAddToGroupDialogOpen(true);
+                                setContextMenu(null);
+                            }}
+                        >
+                            <span>📁</span> グループに追加
+                        </button>
+                        <button
+                            className="w-full text-left px-4 py-2 hover:bg-gray-700 text-sm flex items-center gap-2"
+                            onClick={() => {
+                                router.push(`/stocks/${contextMenu.stock.symbol}`);
+                                setContextMenu(null);
+                            }}
+                        >
+                            <span>🔍</span> 詳細を表示
+                        </button>
+                    </div>
+                </>
+            )}
         </div >
     );
 }
-

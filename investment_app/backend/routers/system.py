@@ -93,7 +93,8 @@ try:
     file_path = filedialog.askopenfilename(
         title='Select File to Import',
         initialdir=initialdir,
-        initialfile=initialfile
+        initialfile=initialfile,
+        filetypes=[("Data Files", "*.csv *.xlsx *.xls"), ("All Files", "*.*")]
     )
     # Print to stdout for capture
     if file_path:

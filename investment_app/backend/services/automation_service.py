@@ -300,10 +300,100 @@ class GeminiAutomationService:
             time.sleep(1)
             
             # Export to Docs
+            # Export to Docs
             docs_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Google ドキュメントにエクスポート')]")))
-            driver.execute_script("arguments[0].click();", docs_btn)
-            self.log("Exported to Google Docs.")
             
+            # Capture handles BEFORE clicking
+            current_handles = driver.window_handles
+            
+            driver.execute_script("arguments[0].click();", docs_btn)
+            self.log("Exported to Google Docs. Waiting for new tab...")
+            
+            doc_title = ""
+            try:
+                # Wait until new handle appears
+                WebDriverWait(driver, 20).until(lambda d: len(d.window_handles) > len(current_handles)) # Reduced timeout
+                
+                new_handles = driver.window_handles
+                new_tab = [h for h in new_handles if h not in current_handles][0]
+                
+                # Switch to new tab to get title
+                driver.switch_to.window(new_tab)
+                # Wait for title to load
+                WebDriverWait(driver, 30).until(lambda d: "Google Docs" in d.title or "Google ドキュメント" in d.title)
+                
+                doc_title_full = driver.title
+                self.log(f"Opened Google Doc: {doc_title_full}")
+                
+                # Clean title: "Analysis of XXX - Google Docs" -> "Analysis of XXX"
+                doc_title = doc_title_full.replace(" - Google Docs", "").replace(" - Google ドキュメント", "").strip()
+                
+                # Close tab and return
+                driver.close()
+                driver.switch_to.window(current_handles[0])
+            except Exception as e:
+                self.log("Tab did not open or timed out. Attempting to find latest file in Drive directly.")
+                # Fallback: We will search for ANY new gdoc in root later.
+                doc_title = None # Signal to use fallback search
+            
+            # Attempt to DETERMINE RATING from Chat Content
+            # Get the last message or full text.
+            # Assuming the response is in a standard Gemini response container.
+            # This is heuristic.
+            rating_prefix = ""
+            try:
+                # Get all text from the chat? Or just try to find specific phrases in the page source.
+                # `driver.page_source` is easiest.
+                page_source = driver.page_source
+                
+                # Check keywords
+                # Priority: 
+                # ◎: Strong Buy, 強い買い
+                # 〇: Buy, 買い (Need to be careful not to match simple context)
+                # △: Promising but overbought, 有望だが, overbought, wait for dip
+                # ×: Sell, Avoid, 売り
+                
+                # Regex might be safer
+                import re
+                
+                # Ideally, we look at the LAST response block.
+                # But source scanning is okay for now if unique enough.
+                
+                if "強い買い" in page_source or "Strong Buy" in page_source:
+                    rating_prefix = "◎ "
+                elif "買い" in page_source or "Buy" in page_source: # "買い推奨" etc.
+                    # Exclude "強い買い" which is already handled
+                    rating_prefix = "〇 "
+                elif "有望" in page_source or "過熱感" in page_source or "様子見" in page_source or "Wait" in page_source:
+                    rating_prefix = "△ "
+                elif "売り" in page_source or "Sell" in page_source or "避ける" in page_source:
+                    rating_prefix = "× "
+                else:
+                    # Default if undetermined
+                    rating_prefix = ""
+                
+                self.log(f"Determined Rating Prefix: '{rating_prefix}'")
+                
+            except Exception as e:
+                self.log(f"Failed to determine rating: {e}")
+
+            # Move File and Link
+            try:
+                new_path = self._move_created_doc(doc_title, symbol, rating_prefix)
+                if new_path:
+                    self.log(f"File moved to: {new_path}")
+                    # Update DB
+                    with Session(engine) as session:
+                        stock = session.exec(select(Stock).where(Stock.symbol == symbol)).first()
+                        if stock:
+                            stock.analysis_file_path = new_path
+                            stock.analysis_linked_at = datetime.utcnow()
+                            session.add(stock)
+                            session.commit()
+                            self.log("Database updated with new file path.")
+            except Exception as e:
+                self.log(f"Failed to move/link file: {e}")
+
             time.sleep(5)
             return True
 
@@ -319,5 +409,81 @@ class GeminiAutomationService:
             except Exception as se:
                 self.log(f"Failed to save screenshot: {se}")
             return False
+
+    def _move_created_doc(self, doc_title: Optional[str], symbol: str, prefix: str) -> Optional[str]:
+        """
+        Locate the file in My Drive (Root) and move to target folder with new name.
+        If doc_title is None, search for the most recently modified .gdoc file in root.
+        """
+        import shutil
+        import glob
+        
+        # Root Dir (Where new GDocs appear)
+        root_dir = r"G:\マイドライブ"
+        target_dir = r"G:\マイドライブ\分析レポート"
+        
+        if not os.path.exists(root_dir) or not os.path.exists(target_dir):
+            self.log(f"Drive paths not found. Root: {os.path.exists(root_dir)}, Target: {os.path.exists(target_dir)}")
+            return None
+            
+        found_file = None
+
+        if doc_title:
+            # Exact/Prefix match strategy
+            safe_title = doc_title.replace("/", "_").replace(":", "_")
+            self.log(f"Searching for file with title: {safe_title}")
+            
+            for i in range(20): # Verify for 60s
+                candidates = glob.glob(os.path.join(root_dir, f"{safe_title}*.gdoc"))
+                if not candidates:
+                    candidates = glob.glob(os.path.join(root_dir, f"{safe_title}*"))
+                    
+                if candidates:
+                    found_file = candidates[0]
+                    break
+                
+                time.sleep(3)
+        else:
+            # FALLBACK: Find latest .gdoc file modified in key duration
+            self.log("Searching for latest .gdoc file in Root...")
+            for i in range(20): # Try for 60s
+                # Get all gdoc files
+                all_gdocs = glob.glob(os.path.join(root_dir, "*.gdoc"))
+                if not all_gdocs:
+                    time.sleep(3)
+                    continue
+                
+                # Sort by modification time (descending)
+                all_gdocs.sort(key=os.path.getmtime, reverse=True)
+                
+                latest = all_gdocs[0]
+                mtime = os.path.getmtime(latest)
+                # If modified within last 3 minutes
+                if (time.time() - mtime) < 180:
+                    found_file = latest
+                    self.log(f"Found latest file: {found_file}")
+                    break
+                
+                time.sleep(3)
+
+        if not found_file:
+            self.log("File not found after wait.")
+            return None
+            
+        # Prepare Destination
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        new_filename = f"{prefix}Deep Research - {symbol} ({date_str}).gdoc"
+        new_filename = new_filename.replace("/", "_").replace(":", "_")
+        
+        dest_path = os.path.join(target_dir, new_filename)
+        
+        # Move
+        self.log(f"Moving {found_file} to {dest_path}")
+        try:
+            shutil.move(found_file, dest_path)
+            return dest_path
+        except Exception as e:
+            self.log(f"Error moving file: {e}")
+            return None
 
 automation_service = GeminiAutomationService()

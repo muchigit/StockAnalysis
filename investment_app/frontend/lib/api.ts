@@ -26,6 +26,22 @@ export interface Stock {
 
   // New Fields
   is_buy_candidate?: boolean;
+
+  // Financials
+  forward_pe?: number;
+  trailing_pe?: number;
+  price_to_book?: number;
+  dividend_yield?: number;
+  return_on_equity?: number;
+  revenue_growth?: number;
+  ebitda?: number;
+  target_mean_price?: number;
+  high_52_week?: number;
+  low_52_week?: number;
+
+
+
+
   volume?: number;
   volume_increase_pct?: number;
   last_earnings_date?: string;
@@ -86,6 +102,8 @@ export interface Stock {
   updated_at?: string;
   daily_chart_data?: string; // JSON
   asset_type?: string;
+  trading_value?: number;
+  float_shares_ratio?: number;
 }
 
 // --- Group API ---
@@ -216,6 +234,17 @@ export interface ChartData {
   close: number;
   volume: number;
   [key: string]: any;
+  analysis_linked_at?: string;
+}
+
+export interface StockFinancials {
+  id: number;
+  symbol: string;
+  report_date: string; // ISO Date 
+  period: 'annual' | 'quarterly';
+  revenue: number | null;
+  net_income: number | null;
+  eps: number | null;
 }
 
 export interface TradeHistory {
@@ -747,5 +776,45 @@ export async function deleteAlert(id: number): Promise<void> {
 
 export async function checkAlerts(): Promise<StockAlert[]> {
   const res = await fetch(`${API_URL}/alerts/check`, { method: 'POST' });
+  return res.json();
+}
+
+export interface StockNews {
+  id?: number;
+  symbol: string;
+  title: string;
+  publisher: string;
+  link: string;
+  provider_publish_time: string;
+  type: string;
+  thumbnail_url?: string;
+  related_tickers_json?: string;
+  related_tickers?: string[]; // Parsed
+}
+
+export async function fetchStockNews(symbol: string): Promise<StockNews[]> {
+  const res = await fetch(`${API_URL}/stocks/${symbol}/news`);
+  if (!res.ok) throw new Error('Failed to fetch news');
+  const data = await res.json();
+  return data.map((d: any) => ({
+    ...d,
+    related_tickers: d.related_tickers_json ? JSON.parse(d.related_tickers_json) : []
+  }));
+}
+
+export async function fetchStockFinancials(symbol: string): Promise<StockFinancials[]> {
+  const response = await fetch(`${API_URL}/stocks/${symbol}/financials`);
+  if (!response.ok) {
+    if (response.status === 404) return [];
+    throw new Error('Failed to fetch stock financials');
+  }
+  return response.json();
+}
+
+export async function refreshFinancials(symbol: string): Promise<Stock> {
+  const res = await fetch(`${API_URL}/stocks/${symbol}/refresh_financials`, {
+    method: 'POST'
+  });
+  if (!res.ok) throw new Error('Failed to refresh financials');
   return res.json();
 }
