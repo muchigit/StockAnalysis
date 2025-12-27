@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { StockAlert, fetchAlerts, checkAlerts, updateAlert, deleteAlert, createAlert, AlertCondition } from '@/lib/api';
+import { StockAlert, fetchAlerts, checkAlerts, updateAlert, deleteAlert, createAlert, AlertCondition, AlertTemplate, fetchAlertTemplates, createAlertTemplate, deleteAlertTemplate } from '@/lib/api';
 
 const SIGNAL_LABELS: Record<string, string> = {
     'current_price': '現在値',
@@ -38,6 +38,12 @@ export default function AlertsPage() {
     const [targetSymbol, setTargetSymbol] = useState('');
     const [stages, setStages] = useState<AlertCondition[][]>([[]]); // List of Stages (each stage is list of conditions)
 
+    // Templates State
+    const [templates, setTemplates] = useState<AlertTemplate[]>([]);
+    const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
+    const [templateName, setTemplateName] = useState("");
+    const [showSaveTemplate, setShowSaveTemplate] = useState(false);
+
     useEffect(() => {
         load();
     }, []);
@@ -45,6 +51,8 @@ export default function AlertsPage() {
     const load = async () => {
         const data = await fetchAlerts();
         setAlerts(data);
+        const tpls = await fetchAlertTemplates();
+        setTemplates(tpls);
     };
 
     const handleCheck = async () => {
@@ -74,6 +82,7 @@ export default function AlertsPage() {
         setTargetSymbol('');
         setStages([[{ metric: 'current_price', op: 'gte', value: 0 }]]);
         setIsEditing(true);
+        setShowSaveTemplate(false);
     };
 
     const startEdit = (alert: StockAlert) => {
@@ -100,6 +109,7 @@ export default function AlertsPage() {
 
         setStages(loadedStages);
         setIsEditing(true);
+        setShowSaveTemplate(false);
     }
 
     const handleSave = async () => {
@@ -120,6 +130,52 @@ export default function AlertsPage() {
         }
         setIsEditing(false);
         load();
+    };
+
+    // --- Template Logic ---
+    const handleLoadTemplate = () => {
+        if (!selectedTemplateId) return;
+        const tpl = templates.find(t => t.id === selectedTemplateId);
+        if (tpl) {
+            try {
+                setStages(JSON.parse(tpl.stages_json));
+            } catch (e) {
+                alert("Failed to parse template data");
+            }
+        }
+    };
+
+    const handleSaveTemplate = async () => {
+        if (!templateName.trim()) {
+            alert("テンプレート名を入力してください");
+            return;
+        }
+        try {
+            await createAlertTemplate({
+                name: templateName,
+                stages_json: JSON.stringify(stages)
+            });
+            setTemplateName("");
+            setShowSaveTemplate(false);
+            const tpls = await fetchAlertTemplates();
+            setTemplates(tpls);
+            alert("テンプレートを保存しました");
+        } catch (e) {
+            alert("テンプレートの保存に失敗しました: " + e);
+        }
+    };
+
+    const handleDeleteTemplate = async () => {
+        if (!selectedTemplateId) return;
+        if (!confirm("選択したテンプレートを削除しますか？")) return;
+        try {
+            await deleteAlertTemplate(selectedTemplateId);
+            const tpls = await fetchAlertTemplates();
+            setTemplates(tpls);
+            setSelectedTemplateId(null);
+        } catch (e) {
+            alert("削除に失敗しました: " + e);
+        }
     };
 
     // --- Form Helpers ---
@@ -257,7 +313,41 @@ export default function AlertsPage() {
                     </div>
                 ) : (
                     <div className="bg-gray-900 rounded-xl border border-gray-800 p-8 max-w-3xl mx-auto">
-                        <h2 className="text-2xl font-bold mb-6 border-b border-gray-700 pb-2">{editId ? 'アラート編集' : 'アラート作成'}</h2>
+                        <div className="flex justify-between items-center mb-6 border-b border-gray-700 pb-2">
+                            <h2 className="text-2xl font-bold">{editId ? 'アラート編集' : 'アラート作成'}</h2>
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-gray-400">テンプレート:</span>
+                                <select
+                                    className="bg-gray-800 border border-gray-600 rounded p-1 text-sm text-gray-200"
+                                    value={selectedTemplateId || ''}
+                                    onChange={e => setSelectedTemplateId(Number(e.target.value) || null)}
+                                >
+                                    <option value="">選択なし</option>
+                                    {templates.map(t => (
+                                        <option key={t.id} value={t.id}>{t.name}</option>
+                                    ))}
+                                </select>
+                                <button onClick={handleLoadTemplate} disabled={!selectedTemplateId} className="px-3 py-1 bg-blue-700 hover:bg-blue-600 rounded text-sm disabled:opacity-50">読込</button>
+                                {selectedTemplateId && (
+                                    <button onClick={handleDeleteTemplate} className="px-3 py-1 bg-red-900/50 hover:bg-red-900 rounded text-red-300 text-sm">削除</button>
+                                )}
+                                <div className="w-px h-6 bg-gray-700 mx-2"></div>
+                                <button onClick={() => setShowSaveTemplate(!showSaveTemplate)} className="text-sm text-yellow-400 hover:text-yellow-300 underline">現設定をテンプレート保存</button>
+                            </div>
+                        </div>
+
+                        {showSaveTemplate && (
+                            <div className="mb-6 bg-yellow-900/20 border border-yellow-700/50 p-4 rounded-lg flex items-center gap-2">
+                                <input
+                                    type="text"
+                                    placeholder="新しいテンプレート名"
+                                    value={templateName}
+                                    onChange={e => setTemplateName(e.target.value)}
+                                    className="bg-gray-800 border border-gray-600 rounded p-1 text-white flex-1"
+                                />
+                                <button onClick={handleSaveTemplate} className="bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1 rounded font-bold">保存</button>
+                            </div>
+                        )}
 
                         <div className="mb-6">
                             <label className="block text-gray-400 text-sm mb-2">対象銘柄</label>

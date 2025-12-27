@@ -53,16 +53,29 @@ app.include_router(calendar.router)
 # Scheduler
 import threading
 import time
+import logging
 from datetime import datetime, timedelta
 import pytz
 from .services.update_manager import update_manager
 
 JST = pytz.timezone('Asia/Tokyo')
 
+from .services.scheduled_jobs import run_nightly_cycle
+
 def scheduler_loop():
+    logger = logging.getLogger("uvicorn")
     while True:
         try:
             now = datetime.now(JST)
+            
+            # Nightly Tasks (2:00 AM - 5:00 AM)
+            if 2 <= now.hour < 5:
+                # logger.info("Running nightly tasks cycle...")
+                try:
+                    run_nightly_cycle()
+                except Exception as e:
+                    logger.error(f"Nightly task error: {e}")
+
             # Check if it's past 9:30 AM
             target_time = now.replace(hour=9, minute=30, second=0, microsecond=0)
             
@@ -72,17 +85,18 @@ def scheduler_loop():
                 should_run = True
                 
                 if last_completed:
-                    last_dt = datetime.fromisoformat(last_completed)
-                    # Use naive comparison if isoformat doesn't have offset, or aware if it does.
-                    # update_manager sets it with now(JST).
-                    # If last completed date is today, skip.
-                    if last_dt.date() == now.date():
-                        should_run = False
+                    try:
+                        last_dt = datetime.fromisoformat(last_completed)
+                        # Ensure timezone awareness compatibility
+                        if last_dt.tzinfo is None:
+                             last_dt = JST.localize(last_dt)
+                        
+                        if last_dt.date() == now.date():
+                            should_run = False
+                    except:
+                        pass # verification failed, run safely
                 
                 if should_run:
-                    # Also check if it's valid update window? 
-                    # Requirement: "If backend starts and it's past 9:30, run if not done".
-                    # Requirement: "If running and becomes 9:30, run".
                     print(f"[Scheduler] Starting daily update at {now}")
                     update_manager.start_update()
                     
@@ -94,7 +108,7 @@ def scheduler_loop():
 @app.on_event("startup")
 def start_scheduler():
     t = threading.Thread(target=scheduler_loop, daemon=True)
-    # t.start() # Temporarily disabled for debugging
+    t.start()
 
 @app.get("/")
 def read_root():

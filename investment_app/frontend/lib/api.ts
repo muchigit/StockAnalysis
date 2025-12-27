@@ -1,4 +1,4 @@
-const API_URL = 'http://127.0.0.1:8000';
+const API_URL = 'http://192.168.10.115:8000'; // LAN Access
 
 export interface Stock {
   symbol: string;
@@ -97,6 +97,9 @@ export interface Stock {
   signal_high_slope5ma?: number;
   signal_rebound_5ma?: number;
   signal_base_formation?: number;
+
+  // News
+  news_summary_jp?: string;
 
 
   updated_at?: string;
@@ -779,6 +782,34 @@ export async function checkAlerts(): Promise<StockAlert[]> {
   return res.json();
 }
 
+// Alert Templates
+export interface AlertTemplate {
+  id?: number;
+  name: string;
+  description?: string;
+  stages_json: string;
+  created_at?: string;
+}
+
+export async function fetchAlertTemplates(): Promise<AlertTemplate[]> {
+  const res = await fetch(`${API_URL}/alerts/templates`);
+  return res.json();
+}
+
+export async function createAlertTemplate(template: AlertTemplate): Promise<AlertTemplate> {
+  const res = await fetch(`${API_URL}/alerts/templates`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(template)
+  });
+  if (!res.ok) throw new Error('Failed to create template');
+  return res.json();
+}
+
+export async function deleteAlertTemplate(id: number): Promise<void> {
+  await fetch(`${API_URL}/alerts/templates/${id}`, { method: 'DELETE' });
+}
+
 export interface StockNews {
   id?: number;
   symbol: string;
@@ -800,6 +831,31 @@ export async function fetchStockNews(symbol: string): Promise<StockNews[]> {
     ...d,
     related_tickers: d.related_tickers_json ? JSON.parse(d.related_tickers_json) : []
   }));
+}
+
+export async function summarizeNews(symbol: string, news: StockNews[]): Promise<string> {
+  const payload = {
+    symbol,
+    news_items: news.map(n => ({
+      title: n.title,
+      date: typeof n.provider_publish_time === 'string' ? n.provider_publish_time : new Date(n.provider_publish_time).toISOString()
+    }))
+  };
+
+  const res = await fetch(`${API_URL}/automation/research/news/summarize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.detail || 'Failed to summarize news');
+  }
+
+  const data = await res.json();
+  if (data.error) throw new Error(data.summary);
+  return data.summary;
 }
 
 export async function fetchStockFinancials(symbol: string): Promise<StockFinancials[]> {

@@ -142,6 +142,9 @@ class Stock(SQLModel, table=True):
     target_mean_price: Optional[float] = None
     high_52_week: Optional[float] = None
     low_52_week: Optional[float] = None
+    
+    # News Summary
+    news_summary_jp: Optional[str] = Field(default=None)
 
 
 
@@ -166,6 +169,13 @@ class StockAlert(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     triggered: bool = False
     last_triggered_at: Optional[datetime] = None
+
+class AlertTemplate(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True)
+    description: Optional[str] = None
+    stages_json: str = Field(default="[]")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class StockFinancials(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)

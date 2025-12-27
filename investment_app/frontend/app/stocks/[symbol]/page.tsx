@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { fetchStockDetail, fetchStockChart, fetchStockSignals, fetchStockHistory, fetchStockNote, saveStockNote, fetchStockAnalysis, deleteStock, Stock, StockGroup, fetchGroups, ChartData, TradeHistory, StockNote, AnalysisResult, updateStock, fetchPrompts, fetchStockPriceHistory, GeminiPrompt, openFile, generateText, updateTradeNote, pickFile, AlertCondition, triggerVisualAnalysis, deleteAnalysisResult, StockNews, fetchStockNews, refreshFinancials, StockFinancials, fetchStockFinancials } from '@/lib/api';
+import { fetchStockDetail, fetchStockChart, fetchStockSignals, fetchStockHistory, fetchStockNote, saveStockNote, fetchStockAnalysis, deleteStock, Stock, StockGroup, fetchGroups, ChartData, TradeHistory, StockNote, AnalysisResult, updateStock, fetchPrompts, fetchStockPriceHistory, GeminiPrompt, openFile, generateText, updateTradeNote, pickFile, AlertCondition, triggerVisualAnalysis, deleteAnalysisResult, StockNews, fetchStockNews, refreshFinancials, StockFinancials, fetchStockFinancials, summarizeNews } from '@/lib/api';
 import { addResearchTicker } from '@/lib/research-storage';
 import { SIGNAL_LABELS } from '@/lib/signals';
 import { StockChart } from '@/components/StockChart';
@@ -46,6 +46,7 @@ export default function StockDetailPage() {
     const [editingTradeNoteValue, setEditingTradeNoteValue] = useState("");
     const [loading, setLoading] = useState(true);
     const [savingNote, setSavingNote] = useState(false);
+    const [summarizing, setSummarizing] = useState(false);
 
     // Prompts (Restored)
     const [prompts, setPrompts] = useState<GeminiPrompt[]>([]);
@@ -395,8 +396,8 @@ export default function StockDetailPage() {
         <main className="min-h-screen bg-gray-900 text-white pb-20">
             {toastMsg && <Toast message={toastMsg} onClose={() => setToastMsg('')} />}
             {/* Sticky Header with Back Link */}
-            <div className="sticky top-0 z-50 bg-gray-900/95 backdrop-blur border-b border-gray-800 px-8 py-4 flex justify-between items-center shadow-md">
-                <div className="flex items-center gap-4">
+            <div className="sticky top-0 z-50 bg-gray-900/95 backdrop-blur border-b border-gray-800 px-4 md:px-8 py-4 flex flex-col md:flex-row justify-between items-start md:items-center shadow-md gap-4 md:gap-0">
+                <div className="flex flex-wrap items-center gap-4">
                     <h1 className="text-2xl font-bold">
                         {stock.symbol}
                         {stock.is_hidden && <span className="text-red-500 text-lg ml-2">(非表示)</span>}
@@ -446,7 +447,7 @@ export default function StockDetailPage() {
                         </span>
                     )}
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
                     <a
                         href={"https://research.investors.com/ibdchartsenlarged.aspx?symbol=" + stock.symbol}
                         target="_blank"
@@ -563,26 +564,26 @@ export default function StockDetailPage() {
 
             {/* Content Grid */}
             {/* Content Grid */}
-            <div className="space-y-6 px-8 mt-4">
+            <div className="space-y-6 px-4 md:px-8 mt-4">
                 {/* Compact Dashboard Metrics Summary */}
-                <div className="flex flex-wrap gap-x-4 gap-y-2 items-center bg-gray-800 rounded-xl px-4 py-2 border border-gray-700 text-xs shadow-sm">
+                <div className="flex flex-wrap gap-x-4 gap-y-2 items-center bg-gray-800 rounded-xl px-4 py-2 border border-gray-700 text-xs shadow-sm w-full md:w-auto">
                     {stock.asset_type !== 'index' && (
                         <>
-                            <div className="bg-gray-800 p-2 rounded text-center min-w-[80px]">
+                            <div className="bg-gray-800 p-2 rounded text-center min-w-[80px] flex-1 md:flex-none">
                                 <div className="text-gray-400 text-xs text-nowrap">株価</div>
                                 <div className="text-white font-bold text-xl text-nowrap">{stock.current_price ? stock.current_price.toLocaleString() : '-'}</div>
                             </div>
-                            <div className="bg-gray-800 p-2 rounded text-center min-w-[80px]">
+                            <div className="bg-gray-800 p-2 rounded text-center min-w-[80px] flex-1 md:flex-none">
                                 <div className="text-gray-400 text-xs text-nowrap">前日比</div>
                                 <span className={"font-bold text-xl text-nowrap " + ((stock.change_percentage_1d || 0) > 0 ? "text-red-400" : (stock.change_percentage_1d || 0) < 0 ? "text-blue-400" : "text-white")}>
                                     {stock.change_percentage_1d ? (stock.change_percentage_1d > 0 ? "+" : "") + stock.change_percentage_1d.toFixed(2) + "%" : "-"}
                                 </span>
                             </div>
-                            <div className="bg-gray-800 p-2 rounded text-center min-w-[80px]">
+                            <div className="bg-gray-800 p-2 rounded text-center min-w-[80px] flex-1 md:flex-none">
                                 <div className="text-gray-400 text-xs text-nowrap">出来高</div>
                                 <div className="text-white font-bold text-xl text-nowrap">{stock.volume ? stock.volume.toLocaleString() : '-'}</div>
                             </div>
-                            <div className="bg-gray-800 p-2 rounded text-center min-w-[80px]">
+                            <div className="bg-gray-800 p-2 rounded text-center min-w-[80px] flex-1 md:flex-none">
                                 <div className="text-gray-400 text-xs text-nowrap">出来高増%</div>
                                 <span className={"font-bold text-xl text-nowrap " + ((stock.volume_increase_pct || 0) > 0 ? "text-red-400" : (stock.volume_increase_pct || 0) < 0 ? "text-blue-400" : "text-white")}>
                                     {stock.volume_increase_pct ? (stock.volume_increase_pct > 0 ? "+" : "") + stock.volume_increase_pct.toFixed(1) + "%" : "-"}
@@ -659,7 +660,7 @@ export default function StockDetailPage() {
 
                     {/* Changes (Grouped) */}
                     {/* Changes (Grouped) */}
-                    <div className="flex items-center gap-4">
+                    <div className="flex flex-wrap items-center gap-4 mt-2 md:mt-0">
                         <div className="flex items-center gap-1" title={t('marketCap') || 'Market Cap'}>
                             <span className="text-gray-500 text-sm">時価総額:</span>
                             <span className="font-mono text-sm text-gray-300">
@@ -710,7 +711,7 @@ export default function StockDetailPage() {
                         </div>
 
                         {/* SMA Deviations */}
-                        <div className="flex items-center gap-4 border-l border-gray-600 pl-4 sm:ml-4 mt-2 sm:mt-0">
+                        <div className="flex flex-wrap items-center gap-4 lg:border-l lg:border-gray-600 lg:pl-4 lg:ml-4 mt-2 sm:mt-0">
                             <div className="flex items-center gap-1" title="乖離率 (5日)">
                                 <span className="text-gray-500 font-mono text-sm">{t('dev5')}:</span>
                                 <span className={"font-mono text-sm " + ((stock.deviation_5ma_pct || 0) > 0 ? "text-red-400" : (stock.deviation_5ma_pct || 0) < 0 ? "text-blue-400" : "text-gray-400")}>
@@ -737,7 +738,7 @@ export default function StockDetailPage() {
                             </div>
                         </div>
                         {/* MA Slopes */}
-                        <div className="flex items-center gap-4 border-l border-gray-600 pl-4 sm:ml-4 mt-2 sm:mt-0">
+                        <div className="flex flex-wrap items-center gap-4 lg:border-l lg:border-gray-600 lg:pl-4 lg:ml-4 mt-2 sm:mt-0">
                             <div className="flex items-center gap-1" title="傾き (5日)">
                                 <span className="text-gray-500 font-mono text-sm">傾き(5):</span>
                                 <span className={"font-mono text-sm " + ((stock.slope_5ma || 0) > 0 ? "text-red-400" : (stock.slope_5ma || 0) < 0 ? "text-blue-400" : "text-gray-400")}>
@@ -764,10 +765,6 @@ export default function StockDetailPage() {
                             </div>
                         </div>
                     </div>
-
-
-
-
 
 
 
@@ -1257,9 +1254,56 @@ export default function StockDetailPage() {
                 {/* News Section */}
 
                 <div className="mt-8">
-                    <h2 className="text-2xl font-bold mb-4 text-gray-300 flex items-center gap-2">
-                        📰 関連ニュース <span className="text-sm font-normal text-gray-500">(yfinance)</span>
-                    </h2>
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-2xl font-bold text-gray-300 flex items-center gap-2">
+                            📰 関連ニュース <span className="text-sm font-normal text-gray-500">(yfinance)</span>
+                        </h2>
+                        <button
+                            onClick={async () => {
+                                if (!stock || summarizing) return;
+                                try {
+                                    setSummarizing(true);
+                                    const summary = await summarizeNews(symbol, news);
+                                    setStock(prev => prev ? { ...prev, news_summary_jp: summary } : null);
+                                } catch (e) {
+                                    alert('Failed to summarize news: ' + e);
+                                } finally {
+                                    setSummarizing(false);
+                                }
+                            }}
+                            disabled={summarizing || news.length === 0}
+                            className={`px-4 py-2 rounded flex items-center gap-2 text-sm font-bold transition ${summarizing || news.length === 0
+                                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                                : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-lg'
+                                }`}
+                        >
+                            {summarizing ? (
+                                <>
+                                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                    </svg>
+                                    生成中...
+                                </>
+                            ) : (
+                                <>
+                                    ✨ AI要約を作成
+                                </>
+                            )}
+                        </button>
+                    </div>
+
+                    {stock?.news_summary_jp && (
+                        <div className="mb-6 bg-gray-800/80 border border-purple-500/30 rounded-xl p-5 shadow-inner">
+                            <h3 className="text-sm font-bold text-purple-400 mb-2 flex items-center gap-2">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                AI ニュース要約
+                            </h3>
+                            <p className="text-gray-200 leading-relaxed whitespace-pre-wrap text-sm">
+                                {stock.news_summary_jp}
+                            </p>
+                        </div>
+                    )}
                     {news.length > 0 ? (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             {news.map((item, i) => (

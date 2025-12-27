@@ -158,40 +158,71 @@ class GeminiService:
             return "Error: Driver setup failed"
         
         result_text = ""
-        try:
-             # 1. Reset
-             driver.get("https://gemini.google.com/?hl=ja")
-             time.sleep(3)
+        max_retries = 3
+        
+        for attempt in range(max_retries):
+            try:
+                 # 1. Reset
+                 driver.get("https://gemini.google.com/?hl=ja")
+                 time.sleep(3)
+    
+                 # 2. Input
+                 self._input_prompt(driver, prompt)
+    
+                 # 3. Send
+                 self._click_send(driver)
+                 
+                 # 5. Wait for completion
+                 logger.info(f"Waiting for generation to complete (Attempt {attempt+1}/{max_retries})...")
+                 send_button_xpath = "//button[contains(@aria-label, 'プロンプトを送信')]"
+                 WebDriverWait(driver, 300).until(
+                     EC.element_to_be_clickable((By.XPATH, send_button_xpath))
+                 )
+                 
+                 time.sleep(2) 
+                 result_text = self._scrape_latest_response(driver)
+                 
+                 if "お手伝いできません" in result_text:
+                     logger.warning(f"Gemini refused response (Attempt {attempt+1}): {result_text[:50]}...")
+                     if attempt < max_retries - 1:
+                         time.sleep(2)
+                         continue
+                     else:
+                         result_text = "Error: Gemini refused request (Retry limit reached)."
+                 
+                 return result_text
+                 
+            except TimeoutException:
+                logger.error("Generation timed out.")
+                if attempt < max_retries - 1:
+                    continue
+                result_text = "Error: Generation timed out (>300s)."
+                return result_text
+                
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                logger.error(f"Generation error: {e}\n{tb}")
+                
+                # Save error log to file for debugging
+                try:
+                    with open("backend/gemini_error.log", "w", encoding="utf-8") as f:
+                        f.write(f"Timestamp: {time.ctime()}\n")
+                        f.write(f"Error: {str(e)}\n")
+                        f.write(f"Traceback:\n{tb}\n")
+                except:
+                    pass
+                    
+                if attempt < max_retries - 1:
+                    logger.info("Retrying due to error...")
+                    continue
 
-             # 2. Input
-             self._input_prompt(driver, prompt)
-
-             # 3. Send
-             self._click_send(driver)
-             
-             # 4. Wait for completion
-             logger.info("Waiting for generation to complete...")
-             # Wait for the Send button to become clickable again (indicates generation finished)
-             send_button_xpath = "//button[contains(@aria-label, 'プロンプトを送信')]"
-             WebDriverWait(driver, 120).until(
-                 EC.element_to_be_clickable((By.XPATH, send_button_xpath))
-             )
-             
-             # Small buffer to ensure text is fully rendered/stable
-             time.sleep(2) 
-             
-             # Scan for the last response
-             result_text = self._scrape_latest_response(driver)
-             
-        except Exception as e:
-            import traceback
-            tb = traceback.format_exc()
-            logger.error(f"Generation error: {e}\n{tb}")
-            result_text = f"Error: Message: {e}\nStacktrace: {tb}"
-        finally:
-             # Do NOT quit driver as it closes the persistent browser instance
-             # driver.quit()
-             pass
+                # Simplify error message for frontend
+                result_text = f"Error: {str(e)}"
+                return result_text
+                
+            finally:
+                 pass
             
         return result_text
 
@@ -250,135 +281,157 @@ class GeminiService:
             return "Error: Driver setup failed"
         
         result_text = ""
-        try:
-             # 1. Reset
-             driver.get("https://gemini.google.com/?hl=ja")
-             time.sleep(3)
-
-             # 2. Upload Image
-             logger.info(f"Uploading image: {image_path}")
-             try:
-                 # 1. Handle Plus Button / Menu
-                 # Look for the button that toggles the upload menu
-                 # It usually has 'aria-label' containing "ファイルをアップロード" and "メニュー" (Menu)
-                 plus_xpath = "//button[contains(@aria-label, 'ファイルをアップロード') and contains(@aria-label, 'メニュー')]"
-                 
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                 # 1. Reset
+                 driver.get("https://gemini.google.com/?hl=ja")
+                 time.sleep(3)
+    
+                 # 2. Upload Image
+                 logger.info(f"Uploading image: {image_path} (Attempt {attempt+1})")
                  try:
-                     plus_btns = driver.find_elements(By.XPATH, plus_xpath)
-                     if plus_btns:
-                         plus_btn = plus_btns[0]
-                         current_label = plus_btn.get_attribute("aria-label") or ""
-                         logger.info(f"Found Plus button: {current_label}")
-                         
-                         if "閉じる" in current_label or "Close" in current_label:
-                             logger.info("Menu appears to be open. Skipping click.")
+                     # 1. Handle Plus Button / Menu
+                     # Look for the button that toggles the upload menu
+                     # It usually has 'aria-label' containing "ファイルをアップロード" and "メニュー" (Menu)
+                     plus_xpath = "//button[contains(@aria-label, 'ファイルをアップロード') and contains(@aria-label, 'メニュー')]"
+                     
+                     try:
+                         plus_btns = driver.find_elements(By.XPATH, plus_xpath)
+                         if plus_btns:
+                             plus_btn = plus_btns[0]
+                             current_label = plus_btn.get_attribute("aria-label") or ""
+                             logger.info(f"Found Plus button: {current_label}")
+                             
+                             if "閉じる" in current_label or "Close" in current_label:
+                                 logger.info("Menu appears to be open. Skipping click.")
+                             else:
+                                 plus_btn.click()
+                                 time.sleep(1)
                          else:
-                             plus_btn.click()
+                             # Fallback to generic Plus button search if specific label not found
+                             logger.warning("Specific Plus button not found, trying generic search.")
+                             generic_plus = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, "//button[.//span[text()='+']]")))
+                             generic_plus.click()
                              time.sleep(1)
-                     else:
-                         # Fallback to generic Plus button search if specific label not found
-                         logger.warning("Specific Plus button not found, trying generic search.")
-                         generic_plus = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, "//button[.//span[text()='+']]")))
-                         generic_plus.click()
-                         time.sleep(1)
-                 except Exception as e:
-                     logger.warning(f"Plus button interaction issue: {e}")
-
-                 # 2. Find File Input (Shadow DOM support)
-                 # We DO NOT click the "Upload File" menu item button because that opens the native OS dialog.
-                 # Instead, we look for the hidden file input that should be present when the menu is active.
-                 
-                 # Debug: Check where we are
-                 logger.info(f"Current Page: {driver.title} ({driver.current_url})")
-                 
-                 find_input_js = """
-                    function findFileInput(root) {
-                        if (!root) return null;
-                        const input = root.querySelector && root.querySelector("input[type='file']");
-                        if (input) return input;
-                        if (root.shadowRoot) {
-                            const found = findFileInput(root.shadowRoot);
-                            if (found) return found;
-                        }
-                        const children = root.querySelectorAll("*");
-                        for (let child of children) {
-                            if (child.shadowRoot) {
-                                const found = findFileInput(child.shadowRoot);
-                                if (found) return found;
-                            }
-                        }
-                        return null;
-                    }
-                    return findFileInput(document.body);
-                 """
-                 
-                 # Poll for the input
-                 file_input = None
-                 for i in range(5):
-                     file_input = driver.execute_script(find_input_js)
-                     if file_input:
-                         break
-                     time.sleep(1)
-                 
-                 if file_input:
-                     file_input.send_keys(image_path)
-                     logger.info("Image path sent to file input.")
-                 else:
-                     # Debug: List ALL inputs to log
-                     debug_inputs_js = """
-                        function listInputs(root, list = []) {
-                            if (!root) return list;
-                            const inputs = root.querySelectorAll && root.querySelectorAll("input");
-                            if (inputs) {
-                                inputs.forEach(i => list.push(`Type: ${i.type}, ID: ${i.id}, Class: ${i.className}, Visible: ${i.offsetParent !== null}`));
-                            }
+                     except Exception as e:
+                         logger.warning(f"Plus button interaction issue: {e}")
+    
+                     # 2. Find File Input (Shadow DOM support)
+                     # We DO NOT click the "Upload File" menu item button because that opens the native OS dialog.
+                     # Instead, we look for the hidden file input that should be present when the menu is active.
+                     
+                     # Debug: Check where we are
+                     logger.info(f"Current Page: {driver.title} ({driver.current_url})")
+                     
+                     find_input_js = """
+                        function findFileInput(root) {
+                            if (!root) return null;
+                            const input = root.querySelector && root.querySelector("input[type='file']");
+                            if (input) return input;
                             if (root.shadowRoot) {
-                                listInputs(root.shadowRoot, list);
+                                const found = findFileInput(root.shadowRoot);
+                                if (found) return found;
                             }
                             const children = root.querySelectorAll("*");
                             for (let child of children) {
                                 if (child.shadowRoot) {
-                                    listInputs(child.shadowRoot, list);
+                                    const found = findFileInput(child.shadowRoot);
+                                    if (found) return found;
                                 }
                             }
-                            return list;
+                            return null;
                         }
-                        return listInputs(document.body);
+                        return findFileInput(document.body);
                      """
-                     found_inputs = driver.execute_script(debug_inputs_js)
-                     logger.error(f"Failed to find input[type='file']. Found inputs: {found_inputs}")
-                     raise Exception(f"Could not locate input[type='file']. Found {len(found_inputs)} other inputs.")
-
-             except Exception as e:
-                 logger.error(f"Upload failed: {e}")
-                 # Debug: Save screenshot
-                 try:
-                    driver.save_screenshot("upload_error_debug.png")
-                 except: pass
-                 return f"Error uploading image: {e}"
-
-             # Wait for upload to complete
-             time.sleep(10)
-             
-             # 3. Input Prompt
-             self._input_prompt(driver, prompt)
-
-             # 4. Send
-             self._click_send(driver)
-             
-             # 5. Wait for completion
-             logger.info("Waiting for generation to complete...")
-             send_button_xpath = "//button[contains(@aria-label, 'プロンプトを送信')]"
-             WebDriverWait(driver, 120).until(
-                 EC.element_to_be_clickable((By.XPATH, send_button_xpath))
-             )
-             
-             time.sleep(2) 
-             result_text = self._scrape_latest_response(driver)
-             
-        except Exception as e:
-            logger.error(f"Image generation error: {e}")
-            result_text = f"Error: {e}"
+                     
+                     # Poll for the input
+                     file_input = None
+                     for i in range(5):
+                         file_input = driver.execute_script(find_input_js)
+                         if file_input:
+                             break
+                         time.sleep(1)
+                     
+                     if file_input:
+                         file_input.send_keys(image_path)
+                         logger.info("Image path sent to file input.")
+                     else:
+                         # Debug: List ALL inputs to log
+                         debug_inputs_js = """
+                            function listInputs(root, list = []) {
+                                if (!root) return list;
+                                const inputs = root.querySelectorAll && root.querySelectorAll("input");
+                                if (inputs) {
+                                    inputs.forEach(i => list.push(`Type: ${i.type}, ID: ${i.id}, Class: ${i.className}, Visible: ${i.offsetParent !== null}`));
+                                }
+                                if (root.shadowRoot) {
+                                    listInputs(root.shadowRoot, list);
+                                }
+                                const children = root.querySelectorAll("*");
+                                for (let child of children) {
+                                    if (child.shadowRoot) {
+                                        listInputs(child.shadowRoot, list);
+                                    }
+                                }
+                                return list;
+                            }
+                            return listInputs(document.body);
+                         """
+                         found_inputs = driver.execute_script(debug_inputs_js)
+                         logger.error(f"Failed to find input[type='file']. Found inputs: {found_inputs}")
+                         raise Exception(f"Could not locate input[type='file']. Found {len(found_inputs)} other inputs.")
+    
+                 except Exception as e:
+                     logger.error(f"Upload failed: {e}")
+                     # Debug: Save screenshot
+                     try:
+                        driver.save_screenshot("upload_error_debug.png")
+                     except: pass
+                     raise e
+    
+                 # Wait for upload to complete
+                 time.sleep(10)
+                 
+                 # 3. Input Prompt
+                 self._input_prompt(driver, prompt)
+    
+                 # 4. Send
+                 self._click_send(driver)
+                 
+                 # 5. Wait for completion
+                 logger.info("Waiting for generation to complete...")
+                 send_button_xpath = "//button[contains(@aria-label, 'プロンプトを送信')]"
+                 WebDriverWait(driver, 300).until(
+                     EC.element_to_be_clickable((By.XPATH, send_button_xpath))
+                 )
+                 
+                 time.sleep(2) 
+                 result_text = self._scrape_latest_response(driver)
+                 
+                 if "お手伝いできません" in result_text:
+                     logger.warning(f"Gemini refused response (Attempt {attempt+1}): {result_text[:50]}...")
+                     if attempt < max_retries - 1:
+                         time.sleep(2)
+                         continue
+                     else:
+                         result_text = "Error: Gemini refused request (Retry limit reached)."
+                 
+                 return result_text
+                 
+            except TimeoutException:
+                 logger.error("Generation timed out.")
+                 if attempt < max_retries - 1:
+                     continue
+                 result_text = "Error: Generation timed out (>300s)."
+                 return result_text
+                 
+            except Exception as e:
+                logger.error(f"Image generation error: {e}")
+                if attempt < max_retries - 1:
+                    continue
+                result_text = f"Error: {str(e)}"
+                return result_text
             
         return result_text
 

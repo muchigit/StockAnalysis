@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import List
 from ..services.automation_service import automation_service
 from ..services.gemini_service import gemini_service
+from datetime import datetime
 
 router = APIRouter(
     prefix="/automation/research",
@@ -34,6 +35,65 @@ async def start_research(request: StartResearchRequest):
 async def stop_research():
     return automation_service.stop_research()
 
-@router.get("/status")
-async def get_status():
     return automation_service.get_status()
+
+# News Summary
+from ..database import Stock, engine, Session
+from sqlmodel import select
+
+class NewsItem(BaseModel):
+    title: str
+    date: str = ""
+
+class SummarizeNewsRequest(BaseModel):
+    symbol: str
+    news_items: List[NewsItem]
+
+@router.post("/news/summarize")
+def summarize_news(request: SummarizeNewsRequest):
+    """
+    Summarize list of news items in Japanese using Gemini.
+    Updates Stock.news_summary_jp in DB.
+    """
+    if not request.news_items:
+        return {"summary": "ニュースが提供されていません。"}
+
+    # Construct Prompt
+    news_text = "\n".join([f"- {item.title} ({item.date})" for item in request.news_items[:10]]) # Limit to 10
+    
+    prompt = f"""
+以下の銘柄の最新ニュースを基に、市場のセンチメントと重要な出来事を日本語で要約してください。
+銘柄: {request.symbol}
+
+【ニュース一覧】
+{news_text}
+
+【制約】
+- 日本語で出力すること
+- 300文字以内で簡潔にまとめること
+- 投資家にとって重要な情報を優先すること（決算、新製品、提携、アナリスト評価など）
+- "ニュースによると"などの前置きは省略し、要点から始めること
+- 追加の提案は不要です
+"""
+    
+    try:
+        # Generate
+        summary = gemini_service.generate_content(prompt)
+        
+        # Clean up error prefixes if any (though gemini_service returns "Error:..." on failure)
+        if summary.startswith("Error:"):
+            return {"summary": summary, "error": True}
+
+        # Save to DB
+        with Session(engine) as session:
+            stock = session.exec(select(Stock).where(Stock.symbol == request.symbol)).first()
+            if stock:
+                stock.news_summary_jp = summary
+                stock.updated_at = datetime.utcnow()
+                session.add(stock)
+                session.commit()
+                
+        return {"summary": summary}
+        
+    except Exception as e:
+        return {"summary": f"Error generating summary: {str(e)}", "error": True}

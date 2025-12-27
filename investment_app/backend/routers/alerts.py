@@ -6,7 +6,7 @@ from datetime import datetime
 import json
 import logging
 
-from ..database import get_session, StockAlert, Stock
+from ..database import get_session, StockAlert, Stock, AlertTemplate
 
 router = APIRouter(
     prefix="/alerts",
@@ -163,4 +163,41 @@ def check_alerts(
             logging.error(f"Error checking alert {alert.id}: {e}")
             
     session.commit()
+    session.commit()
     return triggered_alerts
+
+# Templates
+@router.get("/templates", response_model=List[AlertTemplate])
+def list_templates(
+    session: Session = Depends(get_session)
+):
+    """List all alert templates"""
+    return session.exec(select(AlertTemplate)).all()
+
+@router.post("/templates", response_model=AlertTemplate)
+def create_template(
+    template: AlertTemplate,
+    session: Session = Depends(get_session)
+):
+    """Create a new alert template"""
+    template.created_at = datetime.utcnow()
+    try:
+        session.add(template)
+        session.commit()
+        session.refresh(template)
+        return template
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.delete("/templates/{template_id}")
+def delete_template(
+    template_id: int,
+    session: Session = Depends(get_session)
+):
+    """Delete a template"""
+    tpl = session.get(AlertTemplate, template_id)
+    if not tpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+    session.delete(tpl)
+    session.commit()
+    return {"ok": True}
