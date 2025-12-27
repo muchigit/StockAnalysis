@@ -62,3 +62,6 @@ credentials.json
 
 # Custom
 investment_app/backend/scripts/temp_*.json
+upload_error_*.html
+upload_error_*.png
+backend/debug_screenshots/

@@ -886,3 +886,11 @@ Content Start: RAVE [%COMPANYNAME%] 分析レポート(2025-12-27)
 # 依頼事項
 以下...
 Replaced with: Rave Restaurant Group, Inc.
+
+--- Processing ROKU ---
+Template has COMPANYNAME? True
+Content Start: ROKU [%COMPANYNAME%] 分析レポート(2025-12-27)
+
+# 依頼事項
+以下...
+Replaced with: Roku, Inc.
